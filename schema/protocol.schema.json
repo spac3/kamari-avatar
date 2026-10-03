@@ -1,0 +1,2049 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kamari-avatar/protocol.schema.json",
+  "title": "Protocol",
+  "description": "Kamari avatar WebSocket protocol v1. Source of truth for generated Python and TypeScript types. Binary audio frames: [u8 kind][u32 stream_id][u32 seq][payload], kind 0x01 = mic PCM16 16 kHz (client to server), 0x02 = TTS PCM16 (server to client).",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ServerMessage"
+    },
+    {
+      "$ref": "#/$defs/ClientMessage"
+    }
+  ],
+  "$defs": {
+    "Vec2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "z"
+      ],
+      "description": "Point on the floor plane, metres."
+    },
+    "Target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "Named location from the room manifest"
+        },
+        "point": {
+          "$ref": "#/$defs/Vec2"
+        },
+        "user": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "description": "Exactly one of location, point or user."
+    },
+    "VisemeKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ms from chunk start"
+        },
+        "v": {
+          "$ref": "#/$defs/Viseme"
+        }
+      },
+      "required": [
+        "t",
+        "v"
+      ]
+    },
+    "Viseme": {
+      "type": "string",
+      "enum": [
+        "sil",
+        "PP",
+        "FF",
+        "TH",
+        "DD",
+        "kk",
+        "CH",
+        "SS",
+        "nn",
+        "RR",
+        "aa",
+        "E",
+        "I",
+        "O",
+        "U"
+      ],
+      "description": "Oculus 15-viseme set"
+    },
+    "WordKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "w": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "t",
+        "w"
+      ]
+    },
+    "AvatarSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/Vec2"
+        },
+        "heading_deg": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "location",
+        "position",
+        "heading_deg"
+      ]
+    },
+    "SessionReadyData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "resume_token": {
+          "type": "string"
+        },
+        "manifest_version": {
+          "type": "string"
+        },
+        "audio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tts_rate": {
+              "type": "integer"
+            },
+            "mic_rate": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "tts_rate",
+            "mic_rate"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "resume_token",
+        "manifest_version",
+        "audio"
+      ]
+    },
+    "SessionReadyMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "session_ready",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionReadyData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SessionReadyMessage"
+    },
+    "WalkToData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Target"
+        },
+        "speed": {
+          "type": "string",
+          "enum": [
+            "walk",
+            "run"
+          ],
+          "default": "walk"
+        },
+        "face_on_arrival": {
+          "type": "string",
+          "default": "default"
+        },
+        "interrupt": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "queue"
+          ],
+          "default": "replace"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "target"
+      ]
+    },
+    "WalkToMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "walk_to",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/WalkToData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "WalkToMessage"
+    },
+    "StopMovingData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "blend_ms": {
+          "type": "integer",
+          "default": 300
+        }
+      },
+      "required": [
+        "cmd_id"
+      ]
+    },
+    "StopMovingMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "stop_moving",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/StopMovingData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "StopMovingMessage"
+    },
+    "SpeechStartData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "voice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "text"
+      ]
+    },
+    "SpeechStartMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_start",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechStartData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SpeechStartMessage"
+    },
+    "SpeechChunkData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        },
+        "stream_id": {
+          "type": "integer"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "sample_rate": {
+          "type": "integer"
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "visemes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VisemeKey"
+          }
+        },
+        "words": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WordKey"
+          }
+        },
+        "last": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "stream_id",
+        "seq",
+        "sample_rate",
+        "duration_ms",
+        "last"
+      ]
+    },
+    "SpeechChunkMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_chunk",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechChunkData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SpeechChunkMessage"
+    },
+    "SpeechEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        },
+        "total_chunks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "total_chunks"
+      ]
+    },
+    "SpeechEndMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_end",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechEndData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SpeechEndMessage"
+    },
+    "SpeechCancelData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "reason"
+      ]
+    },
+    "SpeechCancelMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_cancel",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechCancelData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SpeechCancelMessage"
+    },
+    "GestureData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "upper",
+            "full"
+          ],
+          "default": "upper"
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "blend_ms": {
+          "type": "integer",
+          "default": 250
+        }
+      },
+      "required": [
+        "cmd_id",
+        "name"
+      ]
+    },
+    "GestureMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "gesture",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/GestureData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "GestureMessage"
+    },
+    "LookAtData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Target"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "target"
+      ]
+    },
+    "LookAtMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "look_at",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/LookAtData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "LookAtMessage"
+    },
+    "SetExpressionData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "weight"
+      ]
+    },
+    "SetExpressionMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "set_expression",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SetExpressionData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "SetExpressionMessage"
+    },
+    "ListeningData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ptt",
+            "open_mic",
+            "off"
+          ]
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "ListeningMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "listening",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/ListeningData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "ListeningMessage"
+    },
+    "TranscriptData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "final": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "final"
+      ]
+    },
+    "TranscriptMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "transcript",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/TranscriptData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "TranscriptMessage"
+    },
+    "ErrorData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "ErrorMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "error",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/ErrorData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "ErrorMessage"
+    },
+    "StateSyncData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "last_seq": {
+          "type": "integer"
+        },
+        "avatar": {
+          "$ref": "#/$defs/AvatarSnapshot"
+        },
+        "pending_cmds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "speech": {
+          "type": "string",
+          "enum": [
+            "silent",
+            "talking",
+            "listening",
+            "thinking"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "last_seq",
+        "avatar",
+        "pending_cmds",
+        "speech"
+      ]
+    },
+    "StateSyncMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "state_sync",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/StateSyncData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "StateSyncMessage"
+    },
+    "PongData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t"
+      ]
+    },
+    "PongMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "pong",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/PongData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "PongMessage"
+    },
+    "HelloData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "room_id": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string",
+          "enum": [
+            "desktop",
+            "mobile"
+          ]
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "visemes": {
+              "type": "string"
+            },
+            "audio_driven_lipsync": {
+              "type": "boolean"
+            },
+            "mic_modes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "ptt",
+                  "open_mic"
+                ]
+              }
+            }
+          },
+          "required": []
+        },
+        "output_latency_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "client",
+        "version",
+        "room_id"
+      ]
+    },
+    "HelloMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "hello",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/HelloData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "HelloMessage"
+    },
+    "ResumeData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "type": "string"
+        },
+        "resume_token": {
+          "type": "string"
+        },
+        "last_seq_received": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "resume_token",
+        "last_seq_received"
+      ]
+    },
+    "ResumeMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "resume",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/ResumeData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "ResumeMessage"
+    },
+    "VisibilityData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "hidden",
+            "visible"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "VisibilityMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "visibility",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/VisibilityData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "VisibilityMessage"
+    },
+    "PingData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "t"
+      ]
+    },
+    "PingMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "ping",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/PingData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "PingMessage"
+    },
+    "AckData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmd_id"
+      ]
+    },
+    "AckMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "ack",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/AckData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "AckMessage"
+    },
+    "WalkStartedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "path_length_m": {
+          "type": "number"
+        },
+        "eta_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "path_length_m",
+        "eta_ms"
+      ]
+    },
+    "WalkStartedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "walk_started",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/WalkStartedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "WalkStartedMessage"
+    },
+    "ArrivedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/Vec2"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "position"
+      ]
+    },
+    "ArrivedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "arrived",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/ArrivedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "ArrivedMessage"
+    },
+    "WalkFailedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "unreachable",
+            "unknown_location",
+            "blocked"
+          ]
+        },
+        "nearest": {
+          "$ref": "#/$defs/Vec2"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "reason"
+      ]
+    },
+    "WalkFailedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "walk_failed",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/WalkFailedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "WalkFailedMessage"
+    },
+    "CommandCancelledData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "reason"
+      ]
+    },
+    "CommandCancelledMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "command_cancelled",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/CommandCancelledData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "CommandCancelledMessage"
+    },
+    "SpeechStartedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "utterance_id"
+      ]
+    },
+    "SpeechStartedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_started",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechStartedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "SpeechStartedMessage"
+    },
+    "SpeechFinishedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "utterance_id": {
+          "type": "string"
+        },
+        "interrupted": {
+          "type": "boolean"
+        },
+        "played_ms": {
+          "type": "integer"
+        },
+        "last_word_index": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "interrupted",
+        "played_ms"
+      ]
+    },
+    "SpeechFinishedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "speech_finished",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/SpeechFinishedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "SpeechFinishedMessage"
+    },
+    "GestureFinishedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "name"
+      ]
+    },
+    "GestureFinishedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "gesture_finished",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/GestureFinishedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "GestureFinishedMessage"
+    },
+    "UserSpeechStartData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": {
+          "type": "string"
+        },
+        "while": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "talking",
+            "walking"
+          ]
+        }
+      },
+      "required": [
+        "segment_id"
+      ]
+    },
+    "UserSpeechStartMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "user_speech_start",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/UserSpeechStartData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "UserSpeechStartMessage"
+    },
+    "UserSpeechEndData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "segment_id",
+        "duration_ms"
+      ]
+    },
+    "UserSpeechEndMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "user_speech_end",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/UserSpeechEndData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "UserSpeechEndMessage"
+    },
+    "PttData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "down",
+            "up"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ]
+    },
+    "PttMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "ptt",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/PttData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "PttMessage"
+    },
+    "UserTextData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
+    "UserTextMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "user_text",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/UserTextData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "UserTextMessage"
+    },
+    "StateData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "loco": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "turning",
+            "walking",
+            "arriving"
+          ]
+        },
+        "speech": {
+          "type": "string",
+          "enum": [
+            "silent",
+            "talking",
+            "listening",
+            "thinking"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/Vec2"
+        },
+        "heading_deg": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "loco",
+        "speech",
+        "position",
+        "heading_deg"
+      ]
+    },
+    "StateMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "state",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/StateData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "StateMessage"
+    },
+    "ServerMessage": {
+      "title": "ServerMessage",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SessionReadyMessage"
+        },
+        {
+          "$ref": "#/$defs/WalkToMessage"
+        },
+        {
+          "$ref": "#/$defs/StopMovingMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechStartMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechChunkMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechEndMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechCancelMessage"
+        },
+        {
+          "$ref": "#/$defs/GestureMessage"
+        },
+        {
+          "$ref": "#/$defs/LookAtMessage"
+        },
+        {
+          "$ref": "#/$defs/SetExpressionMessage"
+        },
+        {
+          "$ref": "#/$defs/ListeningMessage"
+        },
+        {
+          "$ref": "#/$defs/TranscriptMessage"
+        },
+        {
+          "$ref": "#/$defs/ErrorMessage"
+        },
+        {
+          "$ref": "#/$defs/StateSyncMessage"
+        },
+        {
+          "$ref": "#/$defs/PongMessage"
+        }
+      ]
+    },
+    "ClientMessage": {
+      "title": "ClientMessage",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/HelloMessage"
+        },
+        {
+          "$ref": "#/$defs/ResumeMessage"
+        },
+        {
+          "$ref": "#/$defs/VisibilityMessage"
+        },
+        {
+          "$ref": "#/$defs/PingMessage"
+        },
+        {
+          "$ref": "#/$defs/AckMessage"
+        },
+        {
+          "$ref": "#/$defs/WalkStartedMessage"
+        },
+        {
+          "$ref": "#/$defs/ArrivedMessage"
+        },
+        {
+          "$ref": "#/$defs/WalkFailedMessage"
+        },
+        {
+          "$ref": "#/$defs/CommandCancelledMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechStartedMessage"
+        },
+        {
+          "$ref": "#/$defs/SpeechFinishedMessage"
+        },
+        {
+          "$ref": "#/$defs/GestureFinishedMessage"
+        },
+        {
+          "$ref": "#/$defs/UserSpeechStartMessage"
+        },
+        {
+          "$ref": "#/$defs/UserSpeechEndMessage"
+        },
+        {
+          "$ref": "#/$defs/PttMessage"
+        },
+        {
+          "$ref": "#/$defs/UserTextMessage"
+        },
+        {
+          "$ref": "#/$defs/StateMessage"
+        }
+      ]
+    }
+  }
+}
