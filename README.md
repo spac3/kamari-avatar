@@ -65,9 +65,10 @@ To add an implementation, implement the interface and register it under a new na
 
 ## Kamari integration
 
-`KamariMcpToolProvider` connects to Kamari as an MCP client (Streamable HTTP `url`, or a stdio
-`command`) and exposes its tools to the avatar's LLM as `kamari.<tool>`. Enable it in
-`config/backend.yaml` under `tool_providers` once Kamari is reachable.
+`KamariMcpToolProvider` connects to Kamari's `/mcp` endpoint with a dedicated Bearer key
+(`KAMARI_API_KEY`) and offers an allowlisted subset of Kamari's tools to the avatar's LLM as
+`kamari__<tool>`. Payments, infrastructure, secrets and similar tools are always blocked. Enable it
+under `tool_providers` in `config/backend.yaml`. Details and decisions: [docs/kamari-integration.md](docs/kamari-integration.md).
 
 ## Roadmap
 

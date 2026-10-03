@@ -19,9 +19,19 @@ chunker:
 conversation_store:
   impl: memory
 # External tools the LLM can use. Kamari is the user's MCP server with plugins.
+# Give the avatar its own Kamari API key (env KAMARI_API_KEY) granted only the capabilities
+# it needs; `allow` is a second filter on top. Payments, infra, exec, vault, files, backups,
+# config and outbound messaging are always blocked (see impl/kamari_mcp.py ALWAYS_DENY).
 tool_providers:
   - impl: kamari_mcp
-    enabled: false   # turn on once Kamari is reachable from this backend
-    options: { url: "http://localhost:8765/mcp" }
+    enabled: false   # turn on once the avatar has a Kamari API key
+    options:
+      url: "https://kamari.example/mcp"
+      api_key_env: KAMARI_API_KEY
+      allow: ["memory_get", "memory_list", "memory_create_*", "calendar_*", "tasks_*", "dailyplan_*",
+              "reflections_*", "people_*", "notification_list"]
+      deny: ["*_delete", "*_update", "*_set"]
+      refresh_s: 300
+      timeout_s: 60
 session:
   resume_ttl_s: 600

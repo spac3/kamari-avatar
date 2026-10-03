@@ -18,14 +18,14 @@ def make_fake_kamari() -> MCPServer:
 
 
 async def test_lists_and_calls_kamari_tools_with_prefix():
-    p = KamariMcpToolProvider(server=make_fake_kamari())
+    p = KamariMcpToolProvider(server=make_fake_kamari(), allow=["weather"])
     assert isinstance(p, ToolProvider)
     await p.start()
     try:
         tools = await p.list_tools()
-        assert [t.name for t in tools] == ["kamari.weather"]
+        assert [t.name for t in tools] == ["kamari__weather"]
         assert tools[0].parameters["properties"]["city"]["type"] == "string"
-        result = await p.call_tool("kamari.weather", {"city": "Lisbon"})
+        result = await p.call_tool("kamari__weather", {"city": "Lisbon"})
         assert not result.is_error
         assert "Sunny in Lisbon" in str(result.content)
     finally:
