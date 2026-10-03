@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# baked at build time by `npm run bake`
+web/public/rooms/*/navmesh.bin

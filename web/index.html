@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Kamari</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div class="hud">
+      <span class="chip"><b id="fps">0</b> fps</span>
+      <span class="chip">quality <b id="quality">-</b></span>
+      <span class="chip">server <b id="conn">offline</b></span>
+      <span class="chip" id="status">Loading…</span>
+    </div>
+    <div class="panel"><span id="locations" style="display: contents"></span><button id="toggle-nav" class="secondary">Navmesh</button></div>
+    <div id="overlay"><button id="start">Tap to talk to Kamari</button></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
