@@ -45,7 +45,7 @@ class PiperTTS:
         if not path.is_absolute():
             path = Path(base_dir) / path
         if not path.exists():
-            raise FileNotFoundError(f"Piper voice not found at {path}; see README (Speech) to download one")
+            raise FileNotFoundError(f"Piper voice not found at {path}; see README (Run it) to download one")
         self.alignments = alignments
         self.voice = PiperVoice.load(path, include_alignments=alignments, use_cuda=use_cuda)
         self.sample_rate: int = self.voice.config.sample_rate

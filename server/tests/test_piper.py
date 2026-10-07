@@ -1,6 +1,7 @@
 """Runs only where Piper and a voice are installed: KAMARI_TEST_PIPER_VOICE=/path/to/voice.onnx pytest"""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +14,7 @@ pytestmark = pytest.mark.skipif(not VOICE, reason="set KAMARI_TEST_PIPER_VOICE t
 async def test_piper_chunks_carry_aligned_phonemes():
     from kamari_avatar.impl.piper_tts import PiperTTS
 
-    tts = PiperTTS(VOICE)
+    tts = PiperTTS(str(Path(VOICE).resolve()))  # relative to where pytest runs, not the repo root
     chunks = [c async for c in tts.synth("Hello, welcome. Let me show you the window.")]
     assert len(chunks) == 2  # one per sentence
     for c in chunks:
