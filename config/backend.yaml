@@ -39,6 +39,7 @@ tool_providers:
 session:
   resume_ttl_s: 600
 debug:
-  # /debug/run and /debug/command drive the avatar without a conversation. Development only:
-  # anyone who can reach the backend can make the avatar talk.
-  endpoints: true
+  # /debug/run and /debug/command drive the avatar without a conversation, with no auth: anyone
+  # who can reach the backend could make it walk and talk. Off by default; for local development
+  # set KAMARI_AVATAR_DEBUG=1 when starting the backend instead of changing this.
+  endpoints: false

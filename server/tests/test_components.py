@@ -132,3 +132,34 @@ async def test_fake_tool_provider_satisfies_interface():
     assert isinstance(p, ToolProvider)
     [t] = await p.list_tools()
     assert (await p.call_tool(t.name, {"a": 1})).content == {"tool": "echo", "arguments": {"a": 1}}
+
+
+@pytest.mark.parametrize(("text", "kind", "where"), [
+    ("go to the sofa", "walk_to", "sofa"),
+    ("walk over to the Desk", "walk_to", "desk"),
+    ("move window", "walk_to", "window"),
+    ("go tomorrow", "walk_to", None),  # "tomorrow" is not a place; "to" is not stripped from it
+    ("Hello there", "say", None),
+])
+async def test_director_text_commands(comps, text, kind, where):
+    from kamari_avatar.director import Director
+    from kamari_avatar.session import Session
+
+    sent = []
+
+    class Out:
+        async def send_json(self, t, d):
+            sent.append((t, d))
+
+        async def send_bytes(self, f):
+            pass
+
+    d = Director(Session(id="s", resume_token="t", room_id="studio"), comps, Out())
+    got_kind, ref = await d.command(text)
+    assert got_kind == kind
+    if kind == "walk_to" and where:
+        assert sent[-1] == ("walk_to", {"cmd_id": ref, "target": {"location": where}, "speed": "walk",
+                                        "face_on_arrival": "default", "interrupt": "replace"})
+    elif kind == "walk_to":
+        assert ref is None and sent[-1][0] == "error" and "'tomorrow'" in sent[-1][1]["message"]
+    await d.cancel_speech("test")

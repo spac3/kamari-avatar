@@ -137,6 +137,17 @@ describe('speech player', () => {
     expect(audio.stopped).toBe(1);
     expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u2', interrupted: true, played_ms: 400 }]);
   });
+
+  it('never reports negative playback when interrupted before the audio starts', () => {
+    const audio = new FakeAudio();
+    const sent: [string, unknown][] = [];
+    const sp = new SpeechPlayer(audio, new TimelineLipSync(), (t, d) => sent.push([t, d]));
+    sp.onStart({ type: 'speech_start', data: { utterance_id: 'u3', text: 'hi' } } as never);
+    sp.onChunk({ type: 'speech_chunk', data: { utterance_id: 'u3', stream_id: 1, seq: 0, sample_rate: 1000, duration_ms: 1000, last: false } } as never);
+    sp.onAudio(frame(1, 0, 1000)); // scheduled to start 50 ms from now
+    sp.interrupt();
+    expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u3', interrupted: true, played_ms: 0 }]);
+  });
 });
 
 describe('retargeting', () => {

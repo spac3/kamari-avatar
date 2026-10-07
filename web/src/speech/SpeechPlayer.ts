@@ -87,6 +87,7 @@ export class SpeechPlayer {
   private playedMs(u: Utterance): number {
     if (u.firstAt === null) return 0;
     const now = this.audio.context?.currentTime ?? u.endAt;
-    return Math.round((Math.min(now, u.endAt) - u.firstAt) * 1000);
+    // audio starts slightly in the future, so an early interrupt can come before it began
+    return Math.max(0, Math.round((Math.min(now, u.endAt) - u.firstAt) * 1000));
   }
 }

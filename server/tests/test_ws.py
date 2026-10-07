@@ -115,3 +115,46 @@ def test_debug_run_waits_for_the_browser():
 def test_debug_run_needs_a_browser():
     with TestClient(create_app()) as client:
         assert client.post("/debug/run", json={"steps": [{"say": "hi"}]}).status_code == 404
+
+
+def test_debug_endpoints_are_off_by_default(monkeypatch):
+    monkeypatch.delenv("KAMARI_AVATAR_DEBUG", raising=False)
+    with TestClient(_create_app()) as client:
+        assert client.post("/debug/run", json={"steps": []}).status_code == 404
+    monkeypatch.setenv("KAMARI_AVATAR_DEBUG", "1")
+    with TestClient(_create_app()) as client:
+        assert client.post("/debug/run", json={"steps": [{"say": "hi"}]}).status_code == 404  # on, no browser
+
+
+def test_health_lists_every_component():
+    with TestClient(create_app()) as client:
+        comps = client.get("/health").json()["components"]
+    assert comps["chunker"] == "punctuation" and comps["tts"] == "fake" and comps["tool_providers"] == "none"
+
+
+def test_stale_socket_does_not_disconnect_a_resumed_session():
+    app = create_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as old:
+        old.send_json(HELLO)
+        ready = old.receive_json()["data"]
+        with client.websocket_connect("/ws") as new:
+            new.send_json(msg("resume", {"session_id": ready["session_id"], "resume_token": ready["resume_token"],
+                                         "last_seq_received": 1}))
+            assert new.receive_json()["type"] == "state_sync"
+            old.close()
+            new.send_json(msg("ping", {"t": 1}))
+            assert new.receive_json()["type"] == "pong"  # old socket's exit has been processed
+            assert [s.id for s in app.state.sessions.connected()] == [ready["session_id"]]
+
+
+def test_disconnect_ends_the_utterance_in_progress():
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            sid = ready(ws)
+            ws.send_json(msg("user_text", {"text": "say Hello there"}))
+            ws.receive_json()
+            uid = ws.receive_json()["data"]["utterance_id"]
+        director = app.state.hub.directors[sid]
+        result = client.portal.call(director.wait, uid, 5)
+        assert result["type"] == "speech_cancel" and result["reason"] == "disconnected"

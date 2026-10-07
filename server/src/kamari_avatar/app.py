@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -200,7 +201,7 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
     async def manifest() -> dict[str, Any]:
         return comps.room.manifest()
 
-    if comps.debug.endpoints:
+    if comps.debug.endpoints or os.environ.get("KAMARI_AVATAR_DEBUG") == "1":
         def director_for(session_id: str | None) -> Director:
             live = [s for s in sessions.connected() if s.id in hub.live]
             s = next((s for s in live if s.id == session_id), None) if session_id else (live[0] if live else None)
@@ -267,9 +268,14 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            if conn.session:
-                if hub.live.get(conn.session.id) is conn:
-                    del hub.live[conn.session.id]
+            # Only the session's current socket may mark it gone: a phone that already resumed on a
+            # new socket must stay connected when the old one finally times out.
+            if conn.session and hub.live.get(conn.session.id) is conn:
+                del hub.live[conn.session.id]
                 sessions.disconnected(conn.session)
+                # Audio sent while disconnected is lost, so the browser can never finish this
+                # utterance: end it here rather than leave anyone waiting for speech_finished.
+                if director := hub.directors.get(conn.session.id):
+                    await director.cancel_speech("disconnected")
 
     return app

@@ -149,5 +149,5 @@ class Director:
         return words
 
 
-_WALK = re.compile(r"^(?:please\s+)?(?:go|walk|move)\s+(?:to|over to)?\s*(?P<where>.+)$", re.IGNORECASE)
+_WALK = re.compile(r"^(?:please\s+)?(?:go|walk|move)\s+(?:(?:over\s+)?to\s+)?(?P<where>.+)$", re.IGNORECASE)
 _SAY = re.compile(r"^say[:\s]\s*(?P<what>.+)$", re.IGNORECASE | re.DOTALL)

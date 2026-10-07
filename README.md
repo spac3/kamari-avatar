@@ -66,8 +66,12 @@ cd server && python -m kamari_avatar.demo                    # sofa, default lin
 python -m kamari_avatar.demo window "Nice view, isn't it?"
 ```
 
-It uses the `/debug/run` endpoint, which is on in `config/backend.yaml` for development. Turn
-`debug.endpoints` off on anything reachable from other machines.
+It uses the `/debug/run` endpoint, which has no authentication and is off by default. Start the
+backend with it on for local development:
+
+```bash
+KAMARI_AVATAR_DEBUG=1 uvicorn --factory kamari_avatar.app:create_app --port 8000
+```
 
 Tests: `cd server && pytest` and `cd web && npm test`. The Piper test runs when
 `KAMARI_TEST_PIPER_VOICE` points at a voice `.onnx`.
