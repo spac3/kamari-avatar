@@ -47,6 +47,9 @@ export class FakeAvatar implements AvatarAdapter {
   bone(name: string): THREE.Object3D | null {
     return this.bones.get(name) ?? null;
   }
+  rig(): null {
+    return null;
+  }
   update(): void {
     this.mouth.scale.y = 1 + this.open * 3;
     this.open = 0;

@@ -14,7 +14,10 @@
       <span class="chip">server <b id="conn">offline</b></span>
       <span class="chip" id="status">Loading…</span>
     </div>
-    <div class="panel"><span id="locations" style="display: contents"></span><button id="toggle-nav" class="secondary">Navmesh</button></div>
+    <div class="panel">
+      <span id="locations" style="display: contents"></span><button id="toggle-nav" class="secondary">Navmesh</button>
+      <form id="say"><input name="text" placeholder="Say something, or 'go to window'" autocomplete="off" enterkeyhint="send" /><button>Send</button></form>
+    </div>
     <div id="overlay"><button id="start">Tap to talk to Kamari</button></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

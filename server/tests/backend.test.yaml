@@ -1,3 +1,4 @@
+# Test config: every engine is a fake, so tests never depend on downloaded models.
 # Which implementation backs each interface. Swap a component by changing `impl`.
 # Every interface has a `fake` implementation for development and tests.
 room_registry:
@@ -12,9 +13,8 @@ llm:
 tts:
   # Piper with phoneme alignments (pip install -e "server[piper]", then download the voice; see README).
   # Falls back to the fake tone voice until both are there; /health shows which one is running.
-  impl: piper
-  fallback: fake
-  options: { model: server/voices/en_US-ljspeech-medium.onnx }
+  impl: fake
+  options: { sample_rate: 22050 }
 viseme_mapper:
   impl: oculus_ipa
 chunker:
