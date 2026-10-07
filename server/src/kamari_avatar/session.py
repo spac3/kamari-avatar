@@ -58,3 +58,10 @@ class SessionManager:
 
     def __len__(self) -> int:
         return len(self._sessions)
+
+    def __contains__(self, session_id: str) -> bool:
+        return session_id in self._sessions
+
+    def connected(self) -> list[Session]:
+        """Connected sessions, most recently active first."""
+        return sorted((s for s in self._sessions.values() if s.connected), key=lambda s: -s.last_seen)

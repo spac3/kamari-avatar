@@ -81,7 +81,7 @@ sn = msgs(server, "server"); cn = msgs(client, "client")
 defs["ServerMessage"] = {"title": "ServerMessage", "oneOf": [R(n) for n in sn]}
 defs["ClientMessage"] = {"title": "ClientMessage", "oneOf": [R(n) for n in cn]}
 schema = {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://kamari-avatar/protocol.schema.json",
-  "title": "Protocol", "description": "Kamari avatar WebSocket protocol v1. Source of truth for generated Python and TypeScript types. Binary audio frames: [u8 kind][u32 stream_id][u32 seq][payload], kind 0x01 = mic PCM16 16 kHz (client to server), 0x02 = TTS PCM16 (server to client).",
+  "title": "Protocol", "description": "Kamari avatar WebSocket protocol v1. Source of truth for generated Python and TypeScript types. Binary audio frames: [u8 kind][u32 stream_id][u32 seq][payload], header big-endian, PCM16 payload little-endian; kind 0x01 = mic PCM16 16 kHz (client to server), 0x02 = TTS PCM16 (server to client).",
   "oneOf": [R("ServerMessage"), R("ClientMessage")], "$defs": defs}
 json.dump(schema, open(__import__("pathlib").Path(__file__).resolve().parents[1] / "schema" / "protocol.schema.json", "w"), indent=2)
 print(len(defs))

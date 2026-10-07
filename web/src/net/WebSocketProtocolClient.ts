@@ -1,4 +1,4 @@
-import type { ClientData, ClientType, ConnectionState, ProtocolClient, ServerMsg, ServerType } from '../interfaces';
+import type { AudioFrame, ClientData, ClientType, ConnectionState, ProtocolClient, ServerMsg, ServerType } from '../interfaces';
 import type { ClientMessage, ServerMessage } from '../protocol';
 
 type Handler = (msg: ServerMessage) => void;
@@ -24,6 +24,7 @@ export class WebSocketProtocolClient implements ProtocolClient {
   private ws: WebSocket | null = null;
   private handlers = new Map<string, Set<Handler>>();
   private stateHandlers = new Set<(s: ConnectionState) => void>();
+  private binaryHandlers = new Set<(f: AudioFrame) => void>();
   private attempts = 0;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
@@ -61,11 +62,17 @@ export class WebSocketProtocolClient implements ProtocolClient {
     return () => this.stateHandlers.delete(cb);
   }
 
+  onBinary(cb: (f: AudioFrame) => void): () => void {
+    this.binaryHandlers.add(cb);
+    return () => this.binaryHandlers.delete(cb);
+  }
+
   private open(): void {
     this.clearTimers();
     this.setState(this.sessionId ? 'reconnecting' : 'connecting');
     const WS = this.opts.WebSocketImpl ?? WebSocket;
     const ws = new WS(this.opts.url);
+    ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
       this.attempts = 0;
@@ -77,7 +84,11 @@ export class WebSocketProtocolClient implements ProtocolClient {
       this.heartbeat = setInterval(() => this.send('ping', { t: Date.now() }), this.opts.heartbeatMs ?? 15000);
     };
     ws.onmessage = (ev) => {
-      if (typeof ev.data !== 'string') return; // binary audio frames: M1
+      if (ev.data instanceof ArrayBuffer) {
+        const frame = parseAudioFrame(ev.data);
+        if (frame) this.binaryHandlers.forEach((h) => h(frame));
+        return;
+      }
       const msg = JSON.parse(ev.data) as ServerMessage;
       this.lastSeq = Math.max(this.lastSeq, msg.seq);
       if (msg.type === 'session_ready') {
@@ -122,6 +133,14 @@ export class WebSocketProtocolClient implements ProtocolClient {
   }
 }
 
+/** Splits a binary frame. The PCM16 payload is little-endian, which is every browser's native order. */
+export function parseAudioFrame(buf: ArrayBuffer): AudioFrame | null {
+  if (buf.byteLength < 9) return null;
+  const view = new DataView(buf);
+  const pcm = new Int16Array(buf.slice(9, 9 + ((buf.byteLength - 9) & ~1)));
+  return { kind: view.getUint8(0), streamId: view.getUint32(1), seq: view.getUint32(5), pcm };
+}
+
 /** Fake: no server. Lets the scene run standalone (and in tests). */
 export class OfflineProtocolClient implements ProtocolClient {
   state: ConnectionState = 'offline';
@@ -133,6 +152,9 @@ export class OfflineProtocolClient implements ProtocolClient {
     return () => {};
   }
   onState(): () => void {
+    return () => {};
+  }
+  onBinary(): () => void {
     return () => {};
   }
 }
