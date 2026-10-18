@@ -49,6 +49,4 @@ async def test_conversation_runs_on_the_local_model():
         print(f"  {m.role}: {m.content!r} {m.tool_calls or ''}")
     assert result["type"] == "turn_done", result
     assert not [data for t, data in browser.sent if t == "error"]
-    assert result["reply"] or result["actions"]  # it answered in words, actions or both
-    if result["actions"]:  # whatever a small model calls must have passed validation
-        assert all(a.split("(")[0] in ("walk_to", "gesture", "look_at", "stop_moving") for a in result["actions"])
+    assert "walk_to(window)" in result["actions"]

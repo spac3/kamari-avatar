@@ -13,7 +13,9 @@ USER = "user"
 def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
     locs = room.locations()
     names = [loc.name for loc in locs]
-    places = ", ".join(f"{loc.name} ({loc.label})" for loc in locs)
+    # Only labels that add something: "window (Window)" made a small model answer "Window".
+    places = ", ".join(loc.name if loc.label.lower() == loc.name.lower() else f"{loc.name} ({loc.label})"
+                       for loc in locs)
 
     def one(prop: str, enum: list[str], description: str) -> dict[str, Any]:
         return {"type": "object", "additionalProperties": False, "required": [prop],
@@ -29,6 +31,20 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
         ToolSpec("stop_moving", "Stop walking right away.",
                  {"type": "object", "additionalProperties": False, "properties": {}}, AVATAR),
     ]
+
+
+def normalize(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:
+    """Maps enum values given in another case or with spaces ("Window") to the listed one."""
+    props: dict[str, Any] = spec.parameters.get("properties", {})
+    out = dict(args)
+    for name, value in args.items():
+        enum = props.get(name, {}).get("enum")
+        if enum and isinstance(value, str) and value not in enum:
+            key = value.strip().lower().replace(" ", "_")
+            match = [e for e in enum if str(e).lower() == key]
+            if len(match) == 1:
+                out[name] = match[0]
+    return out
 
 
 def validate(spec: ToolSpec, args: dict[str, Any]) -> str | None:

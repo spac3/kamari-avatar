@@ -52,12 +52,6 @@ jobs:
         run: |
           model=$(python -c "from kamari_avatar.config import BackendConfig as C; print(C.load('config/llm-ollama.yaml').llm.options['model'])")
           curl -sf http://localhost:11434/api/pull -d "{\"model\": \"$model\", \"stream\": false}"
-      - name: show what the model streams back (diagnostics)
-        run: |
-          tools='[{"type":"function","function":{"name":"walk_to","description":"Walk to a place","parameters":{"type":"object","properties":{"location":{"type":"string","enum":["sofa","window"]}},"required":["location"]}}}]'
-          for stream in false true; do
-            curl -s http://localhost:11434/v1/chat/completions -H 'content-type: application/json' -d "{\"model\":\"qwen2.5:1.5b\",\"stream\":$stream,\"max_tokens\":200,\"messages\":[{\"role\":\"user\",\"content\":\"Please walk over to the window.\"}],\"tools\":$tools}" | head -c 3000; echo
-          done
       - run: pytest -q -s tests/test_local_llm.py
         env: { KAMARI_TEST_OLLAMA: "1" }
 

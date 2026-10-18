@@ -125,6 +125,15 @@ async def test_invalid_tool_call_goes_back_to_the_llm():
     assert tool_msg.role == "tool" and "'moon' is not one of" in tool_msg.content
 
 
+async def test_enum_values_in_another_case_are_accepted():
+    # qwen2.5:1.5b answered "Window" for the window; that is not worth a failed round.
+    llm = ScriptedLLM([ToolCall("c1", "walk_to", {"location": "Window"}), TextDelta("On my way."), Done("tool_calls")])
+    d, browser = make(llm)
+    result = await run(d, "go to the window")
+    assert result["actions"] == ["walk_to(window)"] and len(llm.calls) == 1
+    assert "walk_to" in browser.types()
+
+
 async def test_kamari_tool_results_get_a_second_round():
     provider = FakeToolProvider("kamari", tools=[{"name": "kamari__tasks_list", "description": "List tasks"}])
     llm = ScriptedLLM([ToolCall("c1", "kamari__tasks_list", {"day": "today"}), Done("tool_calls")],

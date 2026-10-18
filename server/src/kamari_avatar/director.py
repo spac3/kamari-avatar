@@ -27,7 +27,7 @@ from .config import Components, DirectorSettings
 from .interfaces import AudioSegment, ChatMessage, Done, TextDelta, ToolCall, ToolResult, ToolSpec
 from .protocol import SpeechChunkData, Vec2, VisemeKey, WalkToData
 from .session import Session
-from .tools import AVATAR, USER, avatar_tools, validate
+from .tools import AVATAR, USER, avatar_tools, normalize, validate
 
 log = logging.getLogger("kamari_avatar")
 
@@ -392,11 +392,12 @@ class Director:
         if spec is None:
             return ToolResult(f"there is no tool called {call.name!r}", is_error=True), False
         if spec.source == AVATAR:
-            if err := validate(spec, call.arguments):
+            args = normalize(spec, call.arguments)
+            if err := validate(spec, args):
                 log.info("rejected %s(%s): %s", call.name, call.arguments, err)
                 return ToolResult(err, is_error=True), False
-            turn.actions.append(f"{call.name}({', '.join(map(str, call.arguments.values()))})")
-            return await self._avatar_action(call.name, call.arguments), False
+            turn.actions.append(f"{call.name}({', '.join(map(str, args.values()))})")
+            return await self._avatar_action(call.name, args), False
         provider = next((p for p in self.comps.tool_providers if p.name == spec.source), None)
         if provider is None:
             return ToolResult(f"tool {call.name!r} is not available", is_error=True), True
