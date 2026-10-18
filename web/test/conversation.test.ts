@@ -86,6 +86,41 @@ describe('push to talk', () => {
     expect(net.sent).toEqual([]);
   });
 
+  it('drops a release that was cancelled during its tail', async () => {
+    const net = new RecordingNet();
+    const mic = new ManualMic();
+    const ptt = new PushToTalk(mic, net as unknown as ProtocolClient, () => {}, () => ctx, { tailMs: 20 });
+    await ptt.down();
+    const released = ptt.up();
+    ptt.cancel(); // tab hidden while the tail was recording
+    await ptt.down(); // and a new press before the old release finished
+    await released;
+    expect(ptt.state).toBe('talking');
+    expect(net.sent).toEqual([['ptt', { state: 'down', stream_id: 1 }], ['ptt', { state: 'down', stream_id: 2 }]]);
+  });
+
+  it('opens the mic once when pressed again during the permission prompt', async () => {
+    const net = new RecordingNet();
+    let opens = 0;
+    let release: () => void = () => {};
+    const mic: MicCapture = Object.assign(new ManualMic(), {
+      ready: false,
+      open(): Promise<void> {
+        opens++;
+        return new Promise<void>((r) => (release = () => ((mic as { ready: boolean }).ready = true) && r()));
+      },
+    });
+    const ptt = new PushToTalk(mic, net as unknown as ProtocolClient, () => {}, () => ctx, { tailMs: 0 });
+    const first = ptt.down();
+    await ptt.up();
+    const second = ptt.down(); // pressed again, the prompt still up
+    release();
+    await Promise.all([first, second]);
+    expect(opens).toBe(1);
+    expect(ptt.state).toBe('talking');
+    expect(net.sent).toEqual([['ptt', { state: 'down', stream_id: 1 }]]); // only the press still held
+  });
+
   it('reports a mic that cannot open', async () => {
     const mic = Object.assign(new ManualMic(), { open: () => Promise.reject(new Error('denied')) });
     const errors: unknown[] = [];
@@ -115,6 +150,7 @@ describe('gestures', () => {
     const done: boolean[] = [];
     expect(g.play('wave', (c) => done.push(c))).toBe(true);
     expect(g.play('moonwalk')).toBe(false);
+    expect(g.play('constructor')).toBe(false); // inherited from Object, not a gesture
     for (let t = 0; t < 1; t += 1 / 30) g.update(1 / 30);
     const forearm = avatar.bone('rightLowerArm')!;
     expect(forearm.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(1); // raised

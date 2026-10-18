@@ -121,10 +121,12 @@ def test_chunker_merges_tiny_sentences(comps):
     assert c.feed("Ok. Let me check that for you. ") == ["Ok. Let me check that for you."]
 
 
-def test_store_truncates_after_barge_in(comps):
-    comps.store.append("s", ChatMessage("assistant", "One two three four."))
-    comps.store.truncate_last_assistant("s", "One two")
-    assert comps.store.history("s")[-1].content == "One two [interrupted]"
+def test_store_rewrites_the_last_replies_after_barge_in(comps):
+    for m in [ChatMessage("assistant", "Old."), ChatMessage("user", "hi"), ChatMessage("assistant", "One."),
+              ChatMessage("tool", "{}", tool_call_id="c"), ChatMessage("assistant", "Two three.")]:
+        comps.store.append("s", m)
+    comps.store.rewrite_last_assistants("s", [None, "Two [interrupted]"])
+    assert [m.content for m in comps.store.history("s")] == ["Old.", "hi", "One.", "{}", "Two [interrupted]"]
 
 
 async def test_fake_tool_provider_satisfies_interface():

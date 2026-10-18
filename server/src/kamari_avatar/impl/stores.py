@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 from ..interfaces import ChatMessage
@@ -17,12 +18,12 @@ class MemoryConversationStore:
     def append(self, session_id: str, message: ChatMessage) -> None:
         self._data.setdefault(session_id, []).append(message)
 
-    def truncate_last_assistant(self, session_id: str, heard_text: str) -> None:
+    def rewrite_last_assistants(self, session_id: str, contents: Sequence[str | None]) -> None:
         msgs = self._data.get(session_id, [])
-        for i in range(len(msgs) - 1, -1, -1):
-            if msgs[i].role == "assistant":
-                msgs[i] = replace(msgs[i], content=heard_text + " [interrupted]")
-                return
+        newest = reversed([i for i, m in enumerate(msgs) if m.role == "assistant"])
+        for i, content in zip(newest, reversed(contents), strict=False):
+            if content is not None:
+                msgs[i] = replace(msgs[i], content=content)
 
     def clear(self, session_id: str) -> None:
         self._data.pop(session_id, None)

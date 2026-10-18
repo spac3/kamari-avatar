@@ -21,6 +21,8 @@ export class PushToTalk {
   onError: (e: unknown) => void = () => {};
   private streamId = 0;
   private seq = 0;
+  private press = 0; // bumped by every press, release and cancel: a continuation for an older one stops
+  private opening: Promise<void> | null = null;
 
   constructor(
     private readonly mic: MicCapture,
@@ -38,6 +40,7 @@ export class PushToTalk {
 
   async down(): Promise<void> {
     if (this.state !== 'idle') return;
+    const press = ++this.press;
     this.interruptSpeech();
     if (!this.mic.ready) {
       const ctx = this.context();
@@ -47,13 +50,14 @@ export class PushToTalk {
       }
       this.set('opening');
       try {
-        await this.mic.open(ctx);
+        // One open at a time: a second press during the permission prompt waits for the first.
+        await (this.opening ??= this.mic.open(ctx).finally(() => (this.opening = null)));
       } catch (e) {
-        this.set('idle');
+        if (press === this.press) this.set('idle');
         this.onError(e);
         return;
       }
-      if ((this.state as PttState) !== 'opening') return; // released while the permission prompt was up
+      if (press !== this.press) return; // released (or pressed again) while the permission prompt was up
     }
     this.streamId = (this.streamId + 1) >>> 0;
     this.seq = 0;
@@ -64,20 +68,26 @@ export class PushToTalk {
 
   async up(): Promise<void> {
     if (this.state === 'opening') {
+      this.press++;
       this.set('idle');
       return;
     }
     if (this.state !== 'talking') return;
+    const press = this.press;
+    const streamId = this.streamId;
     this.set('sending');
     if (this.opts.tailMs ?? 120) await new Promise((r) => setTimeout(r, this.opts.tailMs ?? 120));
+    if (press !== this.press) return; // cancelled during the tail: that press is gone
     await this.mic.stop();
-    this.net.send('ptt', { state: 'up', stream_id: this.streamId });
+    if (press !== this.press) return;
+    this.net.send('ptt', { state: 'up', stream_id: streamId });
     this.set('idle');
   }
 
   /** Page hidden mid-press: drop it. The server discards the audio when it hears the tab hid. */
   cancel(): void {
     if (this.state === 'idle') return;
+    this.press++;
     void this.mic.stop();
     this.set('idle');
   }

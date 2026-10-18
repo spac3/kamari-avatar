@@ -155,6 +155,23 @@ describe('speech player', () => {
     expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u2', interrupted: true, played_ms: 400 }]);
   });
 
+  it('does not count the wait for the next sentence as heard audio', () => {
+    const audio = new FakeAudio();
+    const sent: [string, unknown][] = [];
+    const sp = new SpeechPlayer(audio, new TimelineLipSync(), (t, d) => sent.push([t, d]));
+    const chunk = (stream_id: number) =>
+      ({ type: 'speech_chunk', data: { utterance_id: 'u4', stream_id, seq: stream_id, sample_rate: 1000, duration_ms: 1000, last: false } }) as never;
+    sp.onStart({ type: 'speech_start', data: { utterance_id: 'u4', text: 'One.' } } as never);
+    sp.onChunk(chunk(1));
+    sp.onAudio(frame(1, 0, 1000)); // 0.05 to 1.05
+    (audio.context as { currentTime: number }).currentTime = 5; // the next sentence took a while
+    sp.onChunk(chunk(2));
+    sp.onAudio(frame(2, 1, 1000)); // 5.05 to 6.05
+    (audio.context as { currentTime: number }).currentTime = 5.25;
+    sp.interrupt();
+    expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u4', interrupted: true, played_ms: 1200 }]);
+  });
+
   it('never reports negative playback when interrupted before the audio starts', () => {
     const audio = new FakeAudio();
     const sent: [string, unknown][] = [];

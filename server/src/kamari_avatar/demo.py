@@ -45,8 +45,10 @@ def main(argv: list[str] | None = None) -> int:
 
     for e in result["events"]:
         ev = e["event"]
-        if ev["type"] in ("turn_done", "turn_cancelled"):
+        if ev["type"] in ("turn_done", "turn_cancelled", "turn_failed"):
             print(f"heard    {ev['transcript']!r}\nreplied  {ev['reply']!r}\nactions  {', '.join(ev['actions']) or '-'}")
+            if "error" in ev:
+                print(f"error    {ev['error']}")
             print("latency  " + ", ".join(f"{k[:-3]} {v} ms" for k, v in ev["timing"].items() if k != "turn_id"))
             continue
         step = next(iter(e["step"].items()))

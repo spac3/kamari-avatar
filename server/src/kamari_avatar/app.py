@@ -303,6 +303,6 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
                 # Audio sent while disconnected is lost, so the browser can never finish this
                 # utterance: end it here rather than leave anyone waiting for speech_finished.
                 if director := hub.directors.get(conn.session.id):
-                    await director.interrupt("disconnected")
+                    await director.pause("disconnected")  # and a press in progress: its audio has a gap
 
     return app

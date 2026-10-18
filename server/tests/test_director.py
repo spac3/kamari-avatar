@@ -169,6 +169,58 @@ async def test_interrupting_keeps_only_what_was_heard():
     assert "speech_cancel" in browser.types()
 
 
+async def test_interrupting_trims_every_round_of_the_turn():
+    llm = ScriptedLLM([TextDelta("Sure, heading out right now. "), ToolCall("c1", "walk_to", {"location": "moon"}),
+                       Done("tool_calls")],
+                      [TextDelta("Sorry, I cannot go there today. "), TextDelta("Maybe the sofa would do instead? "),
+                       Done()])
+    d, browser = make(llm, Browser(auto=False))
+    await d.converse("go to the moon")
+    turn = d._last_turn
+    await asyncio.wait([turn.task])
+    while len(browser.of("speech_end")) < 1:
+        await asyncio.sleep(0.01)
+    u = turn.utterance
+    assert [text for _, text in u.spoken] == ["Sure, heading out right now.", "Sorry, I cannot go there today.",
+                                              "Maybe the sofa would do instead?"]
+    await d.on_speech_finished(u.id, interrupted=True, played_ms=u.spoken[1][0] + 1)
+    replies = [m.content for m in d.comps.store.history("s_test") if m.role == "assistant"]
+    assert replies == ["Sure, heading out right now.", "Sorry, I cannot go there today. [interrupted]"]
+
+
+async def test_talking_before_the_first_sentence_keeps_nothing_as_heard():
+    llm = ScriptedLLM([TextDelta("Well, let me"), TextDelta(" think about that one for a moment."), Done()],
+                      delay_s=0.05)
+    d, browser = make(llm, Browser(auto=False))
+    await d.converse("what is the meaning of life?")
+    await asyncio.sleep(0.07)  # the first words are in, but no whole sentence yet
+    await d.ptt_down(1)
+    assert d.comps.store.history("s_test")[-1].content == "[interrupted]"
+    assert "speech_start" not in browser.types()
+
+
+async def test_a_failed_turn_is_reported_as_failed():
+    class Broken:
+        async def stream(self, messages, tools):
+            raise RuntimeError("provider down")
+            yield  # pragma: no cover
+
+    d, browser = make(Broken())
+    result = await run(d, "hello")
+    assert result["type"] == "turn_failed" and "provider down" in result["error"]
+    assert browser.of("error")[0]["code"] == "llm_failed"
+
+
+async def test_losing_the_connection_mid_press_drops_the_audio():
+    d, _ = make(ScriptedLLM())
+    await d.ptt_down(1)
+    d.mic_audio(1, b"\x10\x00" * 1600)
+    await d.pause("disconnected")
+    d.mic_audio(1, b"\x10\x00" * 1600)  # the same press, resumed on a new socket
+    assert await d.ptt_up() is None
+    assert d.session.speech == "silent"
+
+
 async def test_cancelled_turn_answers_its_tool_calls():
     llm = ScriptedLLM([ToolCall("c1", "walk_to", {"location": "sofa"}), Done("tool_calls")])
     d, _ = make(llm, Browser(auto=False))

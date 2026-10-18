@@ -81,8 +81,9 @@ class _Utterance:
     ms: int = 0
     turn: _Turn | None = None
 
-    def heard(self, played_ms: int) -> str:
-        return " ".join(text for start, text in self.spoken if start < played_ms)
+    def heard(self, played_ms: int) -> int:
+        """How many sentences had started playing."""
+        return sum(1 for start, _ in self.spoken if start < played_ms)
 
 
 @dataclass
@@ -93,7 +94,11 @@ class _Turn:
     utterance: _Utterance | None = None
     pending_text: str | None = None  # text of the LLM round in progress, not yet in history
     unanswered: list[ToolCall] = field(default_factory=list)  # tool calls in history without a result yet
-    heard: str | None = None  # set when the user cut the reply short: what they actually heard
+    round: int = 0  # LLM round in progress
+    stored: int = 0  # assistant messages this turn has written to history, one per round
+    pieces: list[tuple[int, str]] = field(default_factory=list)  # (round, sentence) in the order spoken
+    heard: int | None = None  # set when the user cut the reply short: how many sentences they heard
+    error: str | None = None
     transcript: str = ""
     reply: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
@@ -265,10 +270,12 @@ class Director:
         if self.session.speech in ("thinking", "talking"):
             self.session.speech = "silent"
 
-    async def pause(self) -> None:
-        """Tab hidden or phone locked: nobody is watching, so stop and drop anything half-heard."""
-        self._mic = None
-        await self.interrupt("hidden")
+    async def pause(self, reason: str = "hidden") -> None:
+        """Tab hidden, phone locked or connection lost: stop, and drop anything half-recorded."""
+        self._mic = self._mic_stream = None
+        if self.session.speech == "listening":
+            self.session.speech = "silent"
+        await self.interrupt(reason)
 
     async def wait_turn(self, turn_id: str, timeout_s: float) -> dict[str, Any]:
         """Until the turn is answered and its speech has played (debug runs and the demo)."""
@@ -283,8 +290,12 @@ class Director:
                                  "actions": turn.actions}
         if turn.task.cancelled():
             event["type"] = "turn_cancelled"
+        elif turn.error:
+            event |= {"type": "turn_failed", "error": turn.error}
         elif turn.utterance:
-            event["speech"] = await self.wait(turn.utterance.id, max(0.1, deadline - time.monotonic()))
+            event["speech"] = speech = await self.wait(turn.utterance.id, max(0.1, deadline - time.monotonic()))
+            if speech["type"] != "speech_finished":
+                event |= {"type": "turn_failed", "error": f"the reply did not finish playing ({speech['type']})"}
         event["timing"] = turn.timing.report()
         return event
 
@@ -314,18 +325,21 @@ class Director:
                 if not more:
                     break
         except asyncio.CancelledError:
+            # Nothing reached the speaker if no sentence was ready; otherwise only what the browser played.
+            heard = turn.heard if turn.heard is not None else (0 if turn.utterance is None else None)
+            if heard is not None:
+                self._trim_heard(turn, heard)
             if turn.pending_text is not None:  # cut off while the LLM was writing
-                said = turn.heard if turn.heard is not None else turn.pending_text
-                store.append(sid, ChatMessage("assistant", said.strip() + " [interrupted]",
+                said = self._heard_in(turn, turn.round, heard) if heard is not None else turn.pending_text.strip()
+                store.append(sid, ChatMessage("assistant", (said + " [interrupted]").strip(),
                                               tool_calls=tuple(turn.unanswered)))
-            elif turn.heard is not None:
-                store.truncate_last_assistant(sid, turn.heard)
             for call in turn.unanswered:  # every tool call needs a result, or the next request is rejected
                 store.append(sid, ChatMessage("tool", json.dumps({"status": "cancelled"}), tool_call_id=call.id))
             raise
         except Exception as e:
             log.exception("turn %s failed", turn.id)
             code = "stt_failed" if audio is not None and not turn.transcript else "llm_failed"
+            turn.error = f"{code}: {str(e) or type(e).__name__}"
             await self.out.send_json("error", {"code": code, "ref": turn.id, "message": str(e) or type(e).__name__})
             self.session.speech = "silent"
         finally:
@@ -340,7 +354,7 @@ class Director:
         sid, store = self.session.id, self.comps.store
         chunker = self.comps.new_chunker()
         calls: list[ToolCall] = []
-        turn.pending_text, turn.unanswered = "", calls
+        turn.pending_text, turn.unanswered, turn.round = "", calls, turn.stored
         async for ev in self.comps.llm.stream(self._messages(), tools):
             if isinstance(ev, TextDelta):
                 turn.timing.mark("llm_first_token")
@@ -356,7 +370,7 @@ class Director:
             self._say_piece(turn, piece)
         text = turn.pending_text.strip()
         store.append(sid, ChatMessage("assistant", text, tool_calls=tuple(calls)))
-        turn.pending_text = None
+        turn.pending_text, turn.stored = None, turn.stored + 1
         if text:
             turn.reply.append(text)
         more = False
@@ -371,6 +385,7 @@ class Director:
 
     def _say_piece(self, turn: _Turn, piece: str) -> None:
         turn.timing.mark("first_sentence")
+        turn.pieces.append((turn.round, piece))
         if turn.utterance is None:
             turn.utterance = self._start_utterance(turn=turn)
             self.session.speech = "talking"
@@ -491,8 +506,21 @@ class Director:
         turn.heard = u.heard(played_ms)
         if turn is self._turn and turn.task and not turn.task.done():
             await self.interrupt("interrupted")  # the turn writes what was heard as it stops
-        elif turn is self._last_turn:
-            self.comps.store.truncate_last_assistant(self.session.id, turn.heard)
+        elif turn is self._last_turn:  # its messages are still the newest in history
+            self._trim_heard(turn, turn.heard)
+
+    @staticmethod
+    def _heard_in(turn: _Turn, round_: int, heard: int) -> str:
+        return " ".join(text for i, (r, text) in enumerate(turn.pieces) if r == round_ and i < heard)
+
+    def _trim_heard(self, turn: _Turn, heard: int) -> None:
+        """Cut this turn's stored replies, one per LLM round, down to the sentences the user heard."""
+        contents: list[str | None] = []
+        for round_ in range(turn.stored):
+            fully = all(i < heard for i, (r, _) in enumerate(turn.pieces) if r == round_)
+            contents.append(None if fully else (self._heard_in(turn, round_, heard) + " [interrupted]").strip())
+        if any(c is not None for c in contents):
+            self.comps.store.rewrite_last_assistants(self.session.id, contents)
 
     def _expect(self, ref: str) -> None:
         if len(self.waiters) > 64:  # nobody waits on commands from the text box; forget finished ones

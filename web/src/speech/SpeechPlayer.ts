@@ -10,6 +10,7 @@ interface Utterance {
   total: number | null; // known once speech_end arrives
   firstAt: number | null;
   endAt: number;
+  chunks: { at: number; dur: number }[]; // scheduled audio, to count what was heard without the gaps
 }
 
 /**
@@ -28,7 +29,7 @@ export class SpeechPlayer {
 
   onStart(msg: ServerMsg<'speech_start'>): void {
     if (this.u) this.interrupt();
-    this.u = { id: msg.data.utterance_id, headers: new Map(), played: 0, total: null, firstAt: null, endAt: 0 };
+    this.u = { id: msg.data.utterance_id, headers: new Map(), played: 0, total: null, firstAt: null, endAt: 0, chunks: [] };
   }
 
   onChunk(msg: ServerMsg<'speech_chunk'>): void {
@@ -47,7 +48,9 @@ export class SpeechPlayer {
     const at = this.audio.enqueue(frame.pcm, header.sample_rate);
     this.lipSync.start(at, header.visemes);
     u.played++;
-    u.endAt = at + frame.pcm.length / header.sample_rate;
+    const dur = frame.pcm.length / header.sample_rate;
+    u.chunks.push({ at, dur });
+    u.endAt = at + dur;
     if (u.firstAt === null) {
       u.firstAt = at;
       this.send('speech_started', { utterance_id: u.id });
@@ -84,10 +87,14 @@ export class SpeechPlayer {
     this.send('speech_finished', { utterance_id: u.id, interrupted: false, played_ms: this.playedMs(u) });
   }
 
+  /**
+   * Audio heard so far, in ms of the utterance's own audio: the server matches it against the
+   * sentences' summed durations, so waits for the next sentence's audio must not count.
+   */
   private playedMs(u: Utterance): number {
-    if (u.firstAt === null) return 0;
     const now = this.audio.context?.currentTime ?? u.endAt;
     // audio starts slightly in the future, so an early interrupt can come before it began
-    return Math.max(0, Math.round((Math.min(now, u.endAt) - u.firstAt) * 1000));
+    const s = u.chunks.reduce((sum, c) => sum + Math.min(Math.max(now - c.at, 0), c.dur), 0);
+    return Math.round(s * 1000);
   }
 }

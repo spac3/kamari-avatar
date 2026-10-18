@@ -83,7 +83,7 @@ export class ProceduralGestures implements GesturePlayer {
   }
 
   play(name: string, onDone?: (completed: boolean) => void): boolean {
-    if (!this.gestures[name]) return false;
+    if (!Object.hasOwn(this.gestures, name)) return false; // not 'constructor' and friends
     this.onDone?.(false);
     this.playing = name;
     this.t = 0;

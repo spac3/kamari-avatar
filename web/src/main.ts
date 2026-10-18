@@ -219,7 +219,11 @@ function lookAt(data: ServerMsg<'look_at'>['data']): void {
 function gesture(data: ServerMsg<'gesture'>['data']): void {
   // Gestures are for the user: turn to face them first when standing (a wave at the window would face away).
   if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
-  const ok = gestures.play(data.name, () => net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name }));
+  const ok = gestures.play(data.name, (completed) =>
+    completed
+      ? net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name })
+      : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'replaced' }),
+  );
   if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: `unknown gesture ${data.name}` });
 }
 
