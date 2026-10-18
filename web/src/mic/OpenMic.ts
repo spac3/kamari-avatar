@@ -26,6 +26,8 @@ export interface OpenMicOptions {
 }
 
 export interface OpenMicHooks {
+  /** True while the server session is ready; until then nothing is heard (a segment could not be sent). */
+  connected(): boolean;
   /** What the avatar is doing now. */
   activity(): AvatarActivity;
   /** Level of the avatar's audio output right now (the echo reference). */
@@ -159,6 +161,7 @@ export class OpenMic {
   }
 
   private async frame(pcm: Int16Array, outputLevel: number): Promise<void> {
+    if (!this.hooks.connected()) return; // the caller cancels a segment in progress when the connection drops
     const keep = this.gate.check(rms(pcm), outputLevel);
     const p = (await this.vad.process(pcm)) * keep;
     this.onProb(p);

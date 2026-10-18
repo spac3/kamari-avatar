@@ -508,17 +508,26 @@ class Director:
                 cmd = await self.walk_to(location=args["location"])
                 if cmd:
                     label = args["location"]
+                    stopped = f"You stopped before reaching the {label} because the user interrupted."
                     try:
                         ev = await self.wait(cmd, self.settings.walk_timeout_s)
                     except asyncio.CancelledError:
-                        self._notes.append(f"You stopped before reaching the {label} because the user interrupted.")
+                        self._notes.append(stopped)
                         raise
                     if ev["type"] == "arrived":
                         self._notes.append(f"You arrived at the {label}.")
                     elif ev["type"] == "walk_failed":
                         self._notes.append(f"You could not walk to the {label} ({ev.get('reason', 'failed')}).")
+                    elif _interrupted(ev):
+                        # The browser stopped the walk for a barge-in, which may reach us before the
+                        # user's speech does: nothing queued after it should start.
+                        self._notes.append(stopped)
+                        self._actions.clear()
+                        return
             elif name == "gesture":
-                await self.wait(await self.gesture(args["name"]), self.settings.gesture_timeout_s)
+                if _interrupted(await self.wait(await self.gesture(args["name"]), self.settings.gesture_timeout_s)):
+                    self._actions.clear()
+                    return
             elif name == "look_at":
                 await self.look_at(args["target"])
 
@@ -634,6 +643,10 @@ class Director:
             if words in (loc.name, loc.label.lower()):
                 return loc.name
         return words
+
+
+def _interrupted(event: dict[str, Any]) -> bool:
+    return event.get("type") == "command_cancelled" and event.get("reason") == "interrupted"
 
 
 _WALK = re.compile(r"^(?:please\s+)?(?:go|walk|move)\s+(?:(?:over\s+)?to\s+)?(?P<where>.+)$", re.IGNORECASE)

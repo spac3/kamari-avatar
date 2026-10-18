@@ -48,6 +48,9 @@ def test_echo_is_the_avatars_own_words_but_never_one_word():
     assert not is_echo("no, go to the sofa instead", said)
     assert not is_echo("wave", said)  # one word: could be the user, and "stop" must always work
     assert not is_echo("window please", [])
+    assert is_echo("I'll go to the window", ["I'll go to the window now."])
+    assert not is_echo("don't go to the window", ["I'll go to the window now."])  # a correction
+    assert not is_echo("no, I'll go to the window", ["I'll go to the window now."])
 
 
 async def test_speaking_over_the_avatar_cuts_its_reply_to_what_was_heard():
@@ -146,3 +149,19 @@ async def test_walks_and_talks_at_once_and_a_barge_in_stops_both():
     await asyncio.wait([d._last_turn.task])
     system = llm.calls[-1]["messages"][0].content
     assert "stopped before reaching the desk" in system
+
+
+async def test_a_walk_the_browser_stopped_for_a_barge_in_starts_nothing_queued_after_it():
+    llm = ScriptedLLM([TextDelta("Off to the desk, then I'll wave. "), ToolCall("c1", "walk_to", {"location": "desk"}),
+                       ToolCall("c2", "gesture", {"name": "wave"}), Done("tool_calls")])
+    d, browser = make(llm, Browser(auto=False))
+    await d.converse("go to the desk and wave")
+    while not browser.of("walk_to"):
+        await asyncio.sleep(0.01)
+    await asyncio.wait([d._last_turn.task])
+    # The browser's barge-in, in the order it sends: the walk's cancel arrives before the user's speech.
+    d.resolve(browser.of("walk_to")[0]["cmd_id"], {"type": "command_cancelled", "reason": "interrupted"})
+    await asyncio.sleep(0.05)
+    assert d._action_task.done() and not browser.of("gesture")  # the wave never started
+    await d.user_speech_start(6, "walking")
+    assert "stopped before reaching the desk" in d._system_prompt()

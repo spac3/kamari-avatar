@@ -90,6 +90,7 @@ interface Rig {
   om: OpenMic;
   log: string[];
   activity: AvatarActivity;
+  connected: boolean;
   output: number;
   /** The avatar's volume: ducked while a barge-in is checked. */
   gain: number;
@@ -103,8 +104,9 @@ interface Rig {
 async function rig(vad: VoiceActivityDetector, opts: OpenMicOptions = {}): Promise<Rig> {
   const mic = new ManualMic();
   const net = new RecordingNet();
-  const r = { mic, net, log: [] as string[], activity: 'idle' as AvatarActivity, output: 0, gain: 1, fed: 0, bargeInAt: null } as Rig;
+  const r = { mic, net, log: [] as string[], activity: 'idle' as AvatarActivity, output: 0, gain: 1, fed: 0, bargeInAt: null, connected: true } as Rig;
   r.om = new OpenMic(mic, vad, net as unknown as ProtocolClient, {
+    connected: () => r.connected,
     activity: () => r.activity,
     outputLevel: () => r.output,
     duck: (on, gain) => {
@@ -186,11 +188,19 @@ describe('open mic state machine', () => {
     expect(r.net.types()).toEqual(['user_speech_start', 'user_speech_end']);
   });
 
+  it('hears nothing until the server session is ready', async () => {
+    const r = await rig(new ScriptedVad([...Array(30).fill(0.95)]));
+    r.connected = false; // e.g. reconnecting after the phone slept
+    await r.feed(silent(20));
+    expect(r.net.sent).toEqual([]);
+    expect(r.om.state).toBe('listening');
+  });
+
   it('falls back to another detector when the first cannot load', async () => {
     const broken: VoiceActivityDetector = { name: 'silero', load: () => Promise.reject(new Error('no wasm')), process: async () => 0, reset() {} };
     const mic = new ManualMic();
     const om = new OpenMic(mic, broken, new RecordingNet() as unknown as ProtocolClient,
-      { activity: () => 'idle', outputLevel: () => 0, duck() {}, bargeIn() {} }, () => ({}) as AudioContext, {}, () => new EnergyVad());
+      { connected: () => true, activity: () => 'idle', outputLevel: () => 0, duck() {}, bargeIn() {} }, () => ({}) as AudioContext, {}, () => new EnergyVad());
     await om.start();
     expect([om.state, om.detector]).toEqual(['listening', 'energy']);
   });

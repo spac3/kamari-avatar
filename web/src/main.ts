@@ -398,6 +398,7 @@ const openMic = new OpenMic(
   create<VoiceActivityDetector>('vad', vadSpec),
   net,
   {
+    connected: () => net.state === 'open',
     activity,
     outputLevel: () => player.outputLevel(),
     duck: (on, gain) => player.setVolume(on ? gain : 1, on ? 0.04 : 0.15),
@@ -511,13 +512,15 @@ function buildTalkButton(): void {
     showMode();
   };
   showMode();
-  // Hold to talk; in hands-free mode a tap mutes or unmutes the open mic.
+  // Hands-free: a click (pointer, keyboard or assistive tech) mutes or unmutes the open mic.
+  btn.addEventListener('click', () => {
+    if (micMode !== 'open') return;
+    muted = openMic.state !== 'off';
+    void (muted ? openMic.stop() : openMic.start()).then(showMode);
+  });
+  // Push-to-talk: hold the button.
   btn.addEventListener('pointerdown', (e) => {
-    if (micMode === 'open') {
-      muted = openMic.state !== 'off';
-      void (muted ? openMic.stop() : openMic.start()).then(showMode);
-      return;
-    }
+    if (micMode !== 'ptt') return;
     btn.setPointerCapture(e.pointerId);
     void ptt.down();
   });
@@ -568,7 +571,13 @@ async function start(): Promise<void> {
   avatar.lookAt(camera.position);
 
   hud.conn.textContent = net.state; // the tap may have connected while assets were loading
-  net.onState((s) => (hud.conn.textContent = s));
+  net.onState((s) => {
+    hud.conn.textContent = s;
+    // The server drops a segment it was collecting when the connection goes: drop ours too, and listen
+    // again once the session is back (if hands-free, unmuted and visible; the mic permission is kept).
+    if (s !== 'open') openMic.cancel();
+    else if (micMode === 'open' && !muted && document.visibilityState === 'visible' && mic.ready) void openMic.start();
+  });
   net.on('walk_to', (m) => walk(m.data));
   net.on('stop_moving', (m) => {
     cancelPendingTap('stopped');

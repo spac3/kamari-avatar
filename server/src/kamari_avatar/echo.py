@@ -3,7 +3,8 @@
 The browser cancels most echo before it reaches the VAD, but some gets through (speakers loud,
 no headphones, a browser without echo cancellation for Web Audio). What does get through is
 transcribed as the words the avatar was saying, so comparing the transcript with those words
-catches it. One-word transcripts are never treated as echo: "stop" must always work.
+catches it. One-word transcripts are never treated as echo ("stop" must always work), and neither is
+one that adds a word that turns it around ("don't go to the window" after "I'll go to the window").
 """
 
 from __future__ import annotations
@@ -13,10 +14,13 @@ from collections.abc import Iterable
 from difflib import SequenceMatcher
 
 _WORD = re.compile(r"[a-z0-9']+")
+# Words that make an otherwise repeated sentence the user's own: a correction, not an echo.
+_TURNING = {"no", "not", "don't", "dont", "never", "stop", "wait", "instead", "cancel", "but", "actually",
+            "nope", "isn't", "can't", "won't", "didn't", "doesn't"}
 
 
 def words(text: str) -> list[str]:
-    return _WORD.findall(text.lower())
+    return _WORD.findall(text.lower().replace("\u2019", "'"))
 
 
 def is_echo(transcript: str, said: Iterable[str], min_ratio: float = 0.75) -> bool:
@@ -27,5 +31,8 @@ def is_echo(transcript: str, said: Iterable[str], min_ratio: float = 0.75) -> bo
     ref = words(" ".join(said))
     if not ref:
         return False
-    matched = sum(b.size for b in SequenceMatcher(None, heard, ref, autojunk=False).get_matching_blocks())
-    return matched / len(heard) >= min_ratio
+    blocks = SequenceMatcher(None, heard, ref, autojunk=False).get_matching_blocks()
+    matched = {i for b in blocks for i in range(b.a, b.a + b.size)}
+    if any(w in _TURNING for i, w in enumerate(heard) if i not in matched):
+        return False
+    return len(matched) / len(heard) >= min_ratio
