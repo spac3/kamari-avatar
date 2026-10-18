@@ -578,10 +578,8 @@ class Director:
                  f"The room has these places: {places}.",
                  f"Gestures you can make: {', '.join(room.gestures())}.", where]
         if p := panel(room):
-            showing = "It is showing now." if here == p["location"] else f"It is hidden now: you are not at the {p['location']}."
-            lines.append(f"A translucent panel appears on the glass between you and the user while you stand at the "
-                         f"{p['location']}; you both can press its controls ({', '.join(c['label'] for c in p['controls'])}). "
-                         + showing)
+            showing = "showing now" if here == p["location"] else "hidden now"
+            lines.append(f"A glass panel with buttons shows while you stand at the {p['location']} ({showing}).")
         if self._notes:
             lines.append("Since the last message: " + " ".join(self._notes))
             self._notes.clear()

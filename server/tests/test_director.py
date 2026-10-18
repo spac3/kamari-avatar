@@ -334,7 +334,7 @@ async def test_presses_a_panel_control_and_hears_the_result_next_turn():
     await run(d, "did it work?")
     system = llm.calls[1]["messages"][0].content
     assert "You pressed Lights on the panel; it is now off." in system
-    assert "translucent panel" in system and "It is showing now." in system
+    assert "glass panel with buttons shows while you stand at the centre (showing now)" in system
 
 
 async def test_a_press_with_the_panel_hidden_is_reported():
@@ -346,7 +346,7 @@ async def test_a_press_with_the_panel_hidden_is_reported():
     await run(d, "well?")
     system = llm.calls[-1]["messages"][0].content
     assert "You could not press Wave on the panel (the panel was not showing)." in system
-    assert "It is hidden now: you are not at the centre." in system
+    assert "(hidden now)" in system
 
 
 async def test_the_user_pressing_a_control_is_told_to_the_llm():

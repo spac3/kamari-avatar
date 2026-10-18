@@ -38,13 +38,10 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
                  {"type": "object", "additionalProperties": False, "properties": {}}, AVATAR),
     ]
     if p := panel(room):
-        controls = ", ".join(f"{c['id']} ({c['label']}{', on/off' if c.get('kind') == 'toggle' else ''})"
-                             for c in p["controls"])
+        # Kept short: a long description here made qwen2.5:1.5b stop calling walk_to at all.
         tools.append(ToolSpec(
-            "press_control",
-            f"Reach out and press a control on the translucent panel on the glass. The panel only shows while "
-            f"you stand at the {p['location']}; if you are elsewhere, walk_to {p['location']} first in the same reply.",
-            one("control", [c["id"] for c in p["controls"]], f"Which control: {controls}"), AVATAR))
+            "press_control", f"Press a button on the glass panel (it only shows at the {p['location']}).",
+            one("control", [c["id"] for c in p["controls"]], "Which button"), AVATAR))
     return tools
 
 
