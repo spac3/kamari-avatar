@@ -1,8 +1,11 @@
 /**
  * Which implementation backs each browser interface. Swap one by changing `impl`,
- * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake`.
+ * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake&touchfx=none`.
+ * `?model=jimmy` loads another avatar file from public/avatars instead of the room's.
  */
+import * as THREE from 'three';
 import { ClipAnimationLibrary } from './anim/ClipAnimationLibrary';
+import { IkScreenTap } from './anim/IkScreenTap';
 import { ProceduralGestures } from './anim/ProceduralGestures';
 import { ProceduralIdle } from './anim/ProceduralIdle';
 import { FakeAvatar } from './avatar/FakeAvatar';
@@ -16,6 +19,8 @@ import type {
   NavigationProvider,
   ProtocolClient,
   RoomProvider,
+  TapPlayer,
+  TouchEffect,
 } from './interfaces';
 import { FakeMicCapture, WorkletMicCapture } from './mic/WorkletMicCapture';
 import { RecastNavigation, StraightLineNavigation } from './nav/RecastNavigation';
@@ -23,6 +28,7 @@ import { OfflineProtocolClient, WebSocketProtocolClient, type WsClientOptions } 
 import { register } from './registry';
 import { ProceduralRoom } from './room/ProceduralRoom';
 import { TimelineLipSync } from './speech/TimelineLipSync';
+import { RippleEffect, type RippleOptions } from './touch/RippleEffect';
 
 export interface Spec { impl: string; options?: Record<string, unknown> }
 
@@ -36,6 +42,10 @@ export interface ClientConfig {
   lipSync: Spec;
   mic: Spec;
   gestures: Spec;
+  tap: Spec;
+  touchFx: Spec;
+  /** Avatar file name in public/avatars (without .vrm) to use instead of the room's; null keeps the room's. */
+  model: string | null;
   quality: 'auto' | 'desktop' | 'mobile' | 'low';
   debug: boolean;
 }
@@ -50,6 +60,9 @@ export const defaultConfig: ClientConfig = {
   lipSync: { impl: 'timeline' },
   mic: { impl: 'worklet', options: { tailMs: 120 } },
   gestures: { impl: 'procedural' },
+  tap: { impl: 'ik' },
+  touchFx: { impl: 'ripples' },
+  model: null,
   quality: 'auto',
   debug: false,
 };
@@ -68,6 +81,9 @@ export function configFromQuery(search: string, base: ClientConfig = defaultConf
     lipSync: pick('lipsync', base.lipSync),
     mic: pick('mic', base.mic),
     gestures: pick('gestures', base.gestures),
+    tap: pick('tap', base.tap),
+    touchFx: pick('touchfx', base.touchFx),
+    model: q.get('model') ?? base.model,
     quality: (q.get('quality') as ClientConfig['quality']) ?? base.quality,
     debug: q.has('debug') || base.debug,
   };
@@ -90,4 +106,7 @@ export function registerBuiltins(): void {
   register<MicCapture>('mic', 'worklet', () => new WorkletMicCapture());
   register<MicCapture>('mic', 'fake', () => new FakeMicCapture());
   register<GesturePlayer>('gestures', 'procedural', (o) => new ProceduralGestures(o.avatar as AvatarAdapter));
+  register<TapPlayer>('tap', 'ik', (o) => new IkScreenTap(o.avatar as AvatarAdapter));
+  register<TouchEffect>('touchfx', 'ripples', (o) => new RippleEffect(o as RippleOptions));
+  register<TouchEffect>('touchfx', 'none', () => ({ object: new THREE.Group(), spawn() {}, update() {} }));
 }

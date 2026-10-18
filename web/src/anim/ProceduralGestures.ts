@@ -62,10 +62,14 @@ export const GESTURES: Record<string, Gesture> = {
 const FADE_IN = 0.3;
 const FADE_OUT = 0.35;
 const MAX_YAW = 1.1; // how far the head turns to look, radians
+const MAX_PITCH = 0.5; // and how far it tilts up or down
 const euler = new THREE.Euler();
 const q = new THREE.Quaternion();
 const yawQ = new THREE.Quaternion();
 const UP = new THREE.Vector3(0, 1, 0);
+const SIDE = new THREE.Vector3(1, 0, 0);
+const pitchQ = new THREE.Quaternion();
+const headPos = new THREE.Vector3();
 
 export class ProceduralGestures implements GesturePlayer {
   playing: string | null = null;
@@ -73,6 +77,7 @@ export class ProceduralGestures implements GesturePlayer {
   private onDone: ((completed: boolean) => void) | undefined;
   private target: THREE.Vector3 | null = null;
   private yaw = 0;
+  private pitch = 0;
   /** Bones changed last frame: what they were before, and what we left them at. */
   private touched = new Map<THREE.Object3D, { base: THREE.Quaternion; left: THREE.Quaternion }>();
 
@@ -131,25 +136,36 @@ export class ProceduralGestures implements GesturePlayer {
     }
   }
 
-  /** Turns neck and head about the vertical axis towards the target, on top of the clip. */
+  /** Turns neck and head towards the target (sideways and up or down), on top of the clip. */
   private updateLook(dt: number, touch: (node: THREE.Object3D) => void): void {
-    let want = 0;
+    let wantYaw = 0;
+    let wantPitch = 0;
     if (this.target) {
       const body = this.avatar.object;
       const dx = this.target.x - body.position.x;
       const dz = this.target.z - body.position.z;
       let d = Math.atan2(dx, dz) - body.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
-      want = Math.max(-MAX_YAW, Math.min(MAX_YAW, d));
+      wantYaw = Math.max(-MAX_YAW, Math.min(MAX_YAW, d));
+      const head = this.avatar.bone('head');
+      if (head) {
+        head.getWorldPosition(headPos);
+        const up = Math.atan2(this.target.y - headPos.y, Math.hypot(this.target.x - headPos.x, this.target.z - headPos.z));
+        wantPitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, up));
+      }
     }
-    this.yaw += (want - this.yaw) * Math.min(1, dt * 5);
-    if (Math.abs(this.yaw) < 1e-3) return;
-    // Rotation about the vertical axis looks the same in -Z and +Z facing rigs, so no mirroring here.
+    const k = Math.min(1, dt * 5);
+    this.yaw += (wantYaw - this.yaw) * k;
+    this.pitch += (wantPitch - this.pitch) * k;
+    if (Math.abs(this.yaw) < 1e-3 && Math.abs(this.pitch) < 1e-3) return;
+    // Rotation about the vertical axis looks the same in -Z and +Z facing rigs; tilting about the
+    // sideways axis flips with the facing (nodding down is -X on -Z rigs, as in GESTURES.nod).
+    const tilt = this.avatar.rig()?.facesNegativeZ === false ? -1 : 1;
     for (const [bone, share] of [['neck', 0.4], ['head', 0.6]] as const) {
       const node = this.avatar.bone(bone);
       if (!node) continue;
       touch(node);
-      node.quaternion.premultiply(yawQ.setFromAxisAngle(UP, this.yaw * share));
+      node.quaternion.premultiply(yawQ.setFromAxisAngle(UP, this.yaw * share)).multiply(pitchQ.setFromAxisAngle(SIDE, this.pitch * share * tilt));
     }
   }
 }

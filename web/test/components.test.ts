@@ -21,6 +21,9 @@ describe('registry and config', () => {
     const c = configFromQuery('?avatar=fake&nav=straight&quality=low&debug');
     expect([c.avatar.impl, c.navigation.impl, c.quality, c.debug]).toEqual(['fake', 'straight', 'low', true]);
     expect(configFromQuery('').avatar.impl).toBe('vrm');
+    const t = configFromQuery('?touchfx=none&model=jimmy');
+    expect([t.touchFx.impl, t.tap.impl, t.model]).toEqual(['none', 'ik', 'jimmy']);
+    expect(available('touchfx')).toEqual(['none', 'ripples']);
   });
 });
 
