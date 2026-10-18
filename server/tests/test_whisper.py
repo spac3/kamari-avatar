@@ -27,7 +27,8 @@ async def test_whisper_hears_what_piper_says():
     from kamari_avatar.impl.piper_tts import PiperTTS
     from kamari_avatar.impl.whisper_stt import FasterWhisperSTT
 
-    tts = PiperTTS(str(Path(VOICE).resolve()))
+    # No sampling noise: the same audio every run (with it, base.en sometimes hears "wave" as "wait").
+    tts = PiperTTS(str(Path(VOICE).resolve()), noise_scale=0.0, noise_w_scale=0.0)
     pcm = b"".join([c.pcm async for c in tts.synth("Please go to the window and wave.")])
     stt = FasterWhisperSTT(MODEL)
     transcript = await stt.transcribe(AudioSegment(to_16k(pcm, tts.sample_rate)))
