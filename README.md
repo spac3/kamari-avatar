@@ -115,7 +115,7 @@ KAMARI_AVATAR_DEBUG=1 uvicorn --factory kamari_avatar.app:create_app --port 8000
 ```
 
 Tests: `cd server && pytest` and `cd web && npm test`. The Piper test runs when
-`KAMARI_TEST_PIPER_VOICE` points at a voice `.onnx`; add `KAMARI_TEST_WHISPER_MODEL=tiny.en` and
+`KAMARI_TEST_PIPER_VOICE` points at a voice `.onnx`; add `KAMARI_TEST_WHISPER_MODEL=base.en` and
 Whisper must hear what Piper said. `KAMARI_TEST_OLLAMA=1` runs a conversation on the local model.
 
 ## Swapping components

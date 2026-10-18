@@ -28,12 +28,12 @@ jobs:
       - uses: actions/cache@v4
         with: { path: server/voices, key: piper-en_US-ljspeech-medium }
       - uses: actions/cache@v4
-        with: { path: ~/.cache/huggingface, key: whisper-tiny.en }
+        with: { path: ~/.cache/huggingface, key: whisper-base.en }
       - run: test -f voices/en_US-ljspeech-medium.onnx || python -m piper.download_voices en_US-ljspeech-medium --data-dir voices
       - run: pytest -q tests/test_piper.py tests/test_whisper.py
         env:
           KAMARI_TEST_PIPER_VOICE: voices/en_US-ljspeech-medium.onnx
-          KAMARI_TEST_WHISPER_MODEL: tiny.en
+          KAMARI_TEST_WHISPER_MODEL: base.en   # the default in config/backend.yaml; tiny.en mishears "wave"
 
   local-llm:
     name: conversation on a local model (ollama)

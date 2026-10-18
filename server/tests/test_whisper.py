@@ -1,6 +1,6 @@
 """Runs where faster-whisper and Piper are installed: Piper says a line and Whisper must hear it.
 
-    KAMARI_TEST_WHISPER_MODEL=tiny.en KAMARI_TEST_PIPER_VOICE=voices/en_US-ljspeech-medium.onnx pytest tests/test_whisper.py
+    KAMARI_TEST_WHISPER_MODEL=base.en KAMARI_TEST_PIPER_VOICE=voices/en_US-ljspeech-medium.onnx pytest tests/test_whisper.py
 """
 
 import os
