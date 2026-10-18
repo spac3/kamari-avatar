@@ -22,6 +22,7 @@ import asyncio
 import collections
 import json
 import logging
+import math
 import re
 import secrets
 import struct
@@ -34,7 +35,7 @@ from .echo import is_echo
 from .interfaces import AudioSegment, ChatMessage, Done, TextDelta, ToolCall, ToolResult, ToolSpec
 from .protocol import SpeechChunkData, Vec2, VisemeKey, WalkToData
 from .session import Session
-from .tools import AVATAR, USER, avatar_tools, normalize, validate
+from .tools import AVATAR, USER, avatar_tools, normalize, panel, validate
 
 log = logging.getLogger("kamari_avatar")
 
@@ -171,6 +172,24 @@ class Director:
         await self.out.send_json("look_at", {"cmd_id": cmd_id, "target": {"user": True} if target == USER
                                              else {"location": target}})
         return cmd_id
+
+    async def press_control(self, control: str) -> str:
+        cmd_id = "c_" + secrets.token_hex(4)
+        self._expect(cmd_id)
+        await self.out.send_json("press_control", {"cmd_id": cmd_id, "control": control})
+        return cmd_id
+
+    def on_control_pressed(self, control: str, source: str, on: bool | None) -> None:
+        """Someone pressed a panel control; the LLM hears of the user's presses next turn."""
+        if source != "user":
+            return  # its own presses come back as the press_control result
+        label = self._control_label(control)
+        state = "" if on is None else f" (now {'on' if on else 'off'})"
+        self._notes.append(f"The user pressed {label} on the panel{state}.")
+
+    def _control_label(self, control: str) -> str:
+        p = panel(self.comps.room) or {"controls": []}
+        return next((c["label"] for c in p["controls"] if c["id"] == control), control)
 
     async def stop_moving(self) -> str:
         cmd_id = "c_" + secrets.token_hex(4)
@@ -530,6 +549,18 @@ class Director:
                     return
             elif name == "look_at":
                 await self.look_at(args["target"])
+            elif name == "press_control":
+                label = self._control_label(args["control"])
+                ev = await self.wait(await self.press_control(args["control"]), self.settings.gesture_timeout_s)
+                if _interrupted(ev):
+                    self._actions.clear()
+                    return
+                if ev["type"] == "control_pressed":
+                    state = "" if ev.get("on") is None else f"; it is now {'on' if ev['on'] else 'off'}"
+                    self._notes.append(f"You pressed {label} on the panel{state}.")
+                else:
+                    why = {"panel_hidden": "the panel was not showing"}.get(ev.get("reason", ""), ev.get("reason") or ev["type"])
+                    self._notes.append(f"You could not press {label} on the panel ({why}).")
 
     def _messages(self) -> list[ChatMessage]:
         history = self.comps.store.history(self.session.id)
@@ -547,6 +578,13 @@ class Director:
         lines = [self.settings.persona.strip(), "",
                  f"The room has these places: {places}.",
                  f"Gestures you can make: {', '.join(room.gestures())}.", where]
+        if p := panel(room):
+            # Where the browser last said it stood, not the last place it arrived at: it starts at the
+            # centre without arriving there, and keeps that place name while walking away.
+            spot, pos = room.location(p["location"]), self.session.avatar.position
+            near = spot is not None and math.hypot(pos.x - spot.x, pos.z - spot.z) <= p.get("radius_m", 0.6)
+            showing = "showing now" if near else "hidden now"
+            lines.append(f"A glass panel with buttons shows while you stand at the {p['location']} ({showing}).")
         if self._notes:
             lines.append("Since the last message: " + " ".join(self._notes))
             self._notes.clear()

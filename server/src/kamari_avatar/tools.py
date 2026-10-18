@@ -10,6 +10,12 @@ AVATAR = "avatar"
 USER = "user"
 
 
+def panel(room: RoomRegistry) -> dict[str, Any] | None:
+    """The room's translucent panel on the glass, if it has one: location, radius_m and controls."""
+    p = room.manifest().get("panel")
+    return p if p and p.get("controls") else None
+
+
 def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
     locs = room.locations()
     names = [loc.name for loc in locs]
@@ -21,7 +27,7 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
         return {"type": "object", "additionalProperties": False, "required": [prop],
                 "properties": {prop: {"type": "string", "enum": enum, "description": description}}}
 
-    return [
+    tools = [
         ToolSpec("walk_to", "Walk to a place in the room. Returns at once: you can keep talking while you walk.",
                  one("location", names, f"Where to go: {places}"), AVATAR),
         ToolSpec("gesture", "Play a body gesture. If you also asked to walk in this reply, it plays on arrival.",
@@ -31,6 +37,12 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
         ToolSpec("stop_moving", "Stop walking right away.",
                  {"type": "object", "additionalProperties": False, "properties": {}}, AVATAR),
     ]
+    if p := panel(room):
+        # Kept short: a long description here made qwen2.5:1.5b stop calling walk_to at all.
+        tools.append(ToolSpec(
+            "press_control", f"Press a button on the glass panel (it only shows at the {p['location']}).",
+            one("control", [c["id"] for c in p["controls"]], "Which button"), AVATAR))
+    return tools
 
 
 def normalize(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:

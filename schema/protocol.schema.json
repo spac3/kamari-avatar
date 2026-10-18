@@ -703,6 +703,62 @@
       ],
       "title": "LookAtMessage"
     },
+    "PressControlData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd_id": {
+          "type": "string"
+        },
+        "control": {
+          "type": "string",
+          "description": "id of a control on the room's glass panel"
+        }
+      },
+      "required": [
+        "cmd_id",
+        "control"
+      ],
+      "description": "Reach out and press a control on the translucent panel on the glass"
+    },
+    "PressControlMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "press_control",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/PressControlData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "PressControlMessage"
+    },
     "SetExpressionData": {
       "type": "object",
       "additionalProperties": false,
@@ -1752,6 +1808,66 @@
       ],
       "title": "GestureFinishedMessage"
     },
+    "ControlPressedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "control": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "avatar"
+          ]
+        },
+        "on": {
+          "type": "boolean"
+        },
+        "cmd_id": {
+          "type": "string",
+          "description": "the press_control this press carried out, if any"
+        }
+      },
+      "required": [
+        "control",
+        "source"
+      ],
+      "description": "A control on the glass panel was pressed, by the user or the avatar; on is a toggle's new state"
+    },
+    "ControlPressedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "control_pressed",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/ControlPressedData"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data"
+      ],
+      "title": "ControlPressedMessage"
+    },
     "UserSpeechStartData": {
       "type": "object",
       "additionalProperties": false,
@@ -2056,6 +2172,9 @@
           "$ref": "#/$defs/LookAtMessage"
         },
         {
+          "$ref": "#/$defs/PressControlMessage"
+        },
+        {
           "$ref": "#/$defs/SetExpressionMessage"
         },
         {
@@ -2116,6 +2235,9 @@
         },
         {
           "$ref": "#/$defs/GestureFinishedMessage"
+        },
+        {
+          "$ref": "#/$defs/ControlPressedMessage"
         },
         {
           "$ref": "#/$defs/UserSpeechStartMessage"

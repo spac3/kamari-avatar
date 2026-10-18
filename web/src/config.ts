@@ -1,6 +1,7 @@
 /**
  * Which implementation backs each browser interface. Swap one by changing `impl`,
  * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake&touchfx=none&vad=energy&micmode=ptt`.
+ * `?panel=none` turns off the translucent panel on the glass.
  * `?model=jimmy` loads another avatar file from public/avatars instead of the room's.
  */
 import * as THREE from 'three';
@@ -14,6 +15,7 @@ import type {
   AnimationLibrary,
   AvatarAdapter,
   GesturePlayer,
+  GlassUi,
   LipSyncDriver,
   MicCapture,
   NavigationProvider,
@@ -29,6 +31,8 @@ import { OfflineProtocolClient, WebSocketProtocolClient, type WsClientOptions } 
 import { register } from './registry';
 import { ProceduralRoom } from './room/ProceduralRoom';
 import { TimelineLipSync } from './speech/TimelineLipSync';
+import { GlassPanel, type GlassPanelOptions } from './touch/GlassPanel';
+import type { PanelControl } from './room/manifest';
 import { RippleEffect, type RippleOptions } from './touch/RippleEffect';
 import type { OpenMicOptions } from './mic/OpenMic';
 import { EnergyVad, type EnergyVadOptions } from './vad/EnergyVad';
@@ -48,6 +52,8 @@ export interface ClientConfig {
   gestures: Spec;
   tap: Spec;
   touchFx: Spec;
+  /** Controls on the glass, shown near the room's panel location; its controls come from the manifest. */
+  panel: Spec;
   /** Voice activity detector for the open mic; `energy` stands in if it cannot load. */
   vad: Spec;
   /**
@@ -74,6 +80,7 @@ export const defaultConfig: ClientConfig = {
   gestures: { impl: 'procedural' },
   tap: { impl: 'ik' },
   touchFx: { impl: 'ripples' },
+  panel: { impl: 'glass' },
   vad: { impl: 'silero', options: { model: 'vad/silero_vad_v6.onnx' } },
   micMode: 'auto',
   openMic: {},
@@ -98,6 +105,7 @@ export function configFromQuery(search: string, base: ClientConfig = defaultConf
     gestures: pick('gestures', base.gestures),
     tap: pick('tap', base.tap),
     touchFx: pick('touchfx', base.touchFx),
+    panel: pick('panel', base.panel),
     vad: pick('vad', base.vad),
     micMode: (q.get('micmode') as ClientConfig['micMode']) ?? base.micMode,
     model: q.get('model') ?? base.model,
@@ -126,6 +134,8 @@ export function registerBuiltins(): void {
   register<TapPlayer>('tap', 'ik', (o) => new IkScreenTap(o.avatar as AvatarAdapter));
   register<TouchEffect>('touchfx', 'ripples', (o) => new RippleEffect(o as RippleOptions));
   register<TouchEffect>('touchfx', 'none', () => ({ object: new THREE.Group(), spawn() {}, update() {} }));
+  register<GlassUi>('panel', 'glass', (o) => new GlassPanel(o.controls as PanelControl[], o as GlassPanelOptions));
+  register<GlassUi | null>('panel', 'none', () => null);
   register<VoiceActivityDetector>('vad', 'silero', (o) => new SileroVad(o as unknown as SileroVadOptions));
   register<VoiceActivityDetector>('vad', 'energy', (o) => new EnergyVad(o as EnergyVadOptions));
 }

@@ -4,7 +4,7 @@
  */
 import type * as THREE from 'three';
 import type { ClientMessage, ServerMessage, Viseme } from './protocol';
-import type { RoomManifest } from './room/manifest';
+import type { PanelControl, RoomManifest } from './room/manifest';
 
 export interface Vec2 { x: number; z: number }
 
@@ -143,6 +143,33 @@ export interface TouchEffect {
   readonly object: THREE.Object3D;
   /** `facing`: the glass orientation (the camera's), so flat effects face the viewer. */
   spawn(touch: ScreenTouch, facing: THREE.Quaternion): void;
+  update(dt: number): void;
+}
+
+export interface PanelPress { control: PanelControl; source: TouchSource }
+
+/**
+ * Controls drawn on the glass that both sides can press (a translucent panel, a dial...).
+ * The page places it each frame and says when it should show; the room manifest lists its controls.
+ */
+export interface GlassUi {
+  readonly object: THREE.Object3D;
+  /** Controls with their current state (toggles: `on`). */
+  readonly controls: PanelControl[];
+  /** 0 hidden .. 1 fully shown (it fades). */
+  readonly shown: number;
+  /** Shown enough that touches reach its controls. */
+  readonly touchable: boolean;
+  /** Centre on the glass (world space) and orientation (the camera's, facing the viewer). */
+  place(center: THREE.Vector3, facing: THREE.Quaternion): void;
+  /** Fade in (true) or out. */
+  show(on: boolean): void;
+  /** The control under a glass point, if it is touchable there. */
+  controlAt(point: THREE.Vector3): PanelControl | null;
+  /** Centre of a control on the glass, world space: where the avatar aims to press it. */
+  pointOf(id: string): THREE.Vector3 | null;
+  /** Press a control (toggles flip). Null if hidden or unknown. */
+  press(id: string, source: TouchSource): PanelPress | null;
   update(dt: number): void;
 }
 

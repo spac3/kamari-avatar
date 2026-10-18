@@ -161,6 +161,12 @@ class Connection:
                 if d.cmd_id in s.pending_cmds:
                     s.pending_cmds.remove(d.cmd_id)
                 director.resolve(d.cmd_id, {"type": msg.type} | d.model_dump(mode="json", exclude_none=True))
+            case "control_pressed":
+                if d.cmd_id:
+                    if d.cmd_id in s.pending_cmds:
+                        s.pending_cmds.remove(d.cmd_id)
+                    director.resolve(d.cmd_id, {"type": msg.type} | d.model_dump(mode="json", exclude_none=True))
+                director.on_control_pressed(d.control, d.source, d.on)
             case "speech_started":
                 s.speech = "talking"
                 director.on_speech_started(d.utterance_id)

@@ -262,3 +262,14 @@ def test_pages_from_other_sites_cannot_connect():
         with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
             ws.send_json(HELLO)
             assert ws.receive_json()["type"] == "session_ready"
+
+
+def test_panel_presses_reach_the_director():
+    app = create_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        sid = ready(ws)
+        ws.send_json(msg("control_pressed", {"control": "lights", "source": "user", "on": False}))
+        ws.send_json(msg("ping", {"t": 7}))
+        assert ws.receive_json()["type"] == "pong"  # accepted, no bad_message error
+        director = app.state.hub.directors[sid]
+        assert director._notes == ["The user pressed Lights on the panel (now off)."]

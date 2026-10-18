@@ -14,6 +14,7 @@ export type ServerMessage =
   | SpeechCancelMessage
   | GestureMessage
   | LookAtMessage
+  | PressControlMessage
   | SetExpressionMessage
   | ListeningMessage
   | TranscriptMessage
@@ -39,6 +40,7 @@ export type ClientMessage =
   | SpeechStartedMessage
   | SpeechFinishedMessage
   | GestureFinishedMessage
+  | ControlPressedMessage
   | UserSpeechStartMessage
   | UserSpeechEndMessage
   | PttMessage
@@ -257,6 +259,30 @@ export interface LookAtMessage {
 export interface LookAtData {
   cmd_id: string;
   target: Target;
+}
+export interface PressControlMessage {
+  v: 1;
+  type: "press_control";
+  id: string;
+  /**
+   * Unix ms
+   */
+  ts: number;
+  data: PressControlData;
+  /**
+   * Monotonic per session, used by resume
+   */
+  seq: number;
+}
+/**
+ * Reach out and press a control on the translucent panel on the glass
+ */
+export interface PressControlData {
+  cmd_id: string;
+  /**
+   * id of a control on the room's glass panel
+   */
+  control: string;
 }
 export interface SetExpressionMessage {
   v: 1;
@@ -577,6 +603,28 @@ export interface GestureFinishedMessage {
 export interface GestureFinishedData {
   cmd_id: string;
   name: string;
+}
+export interface ControlPressedMessage {
+  v: 1;
+  type: "control_pressed";
+  id: string;
+  /**
+   * Unix ms
+   */
+  ts: number;
+  data: ControlPressedData;
+}
+/**
+ * A control on the glass panel was pressed, by the user or the avatar; on is a toggle's new state
+ */
+export interface ControlPressedData {
+  control: string;
+  source: "user" | "avatar";
+  on?: boolean;
+  /**
+   * the press_control this press carried out, if any
+   */
+  cmd_id?: string;
 }
 export interface UserSpeechStartMessage {
   v: 1;

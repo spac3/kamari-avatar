@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { IkScreenTap } from '../src/anim/IkScreenTap';
 import { FakeAvatar } from '../src/avatar/FakeAvatar';
 import type { AvatarAdapter, ScreenTouch } from '../src/interfaces';
+import { GlassPanel } from '../src/touch/GlassPanel';
 import { RippleEffect } from '../src/touch/RippleEffect';
 import { ScreenGlass } from '../src/touch/ScreenGlass';
 
@@ -129,5 +130,66 @@ describe('the screen as glass', () => {
     off();
     glass.touch('user', glass.pointAt(0.5, 0.5)!);
     expect(seen).toHaveLength(2);
+  });
+});
+
+describe('the panel on the glass', () => {
+  const controls = [
+    { id: 'lights', label: 'Lights', kind: 'toggle' as const, on: true },
+    { id: 'wave', label: 'Wave' },
+  ];
+  const facing = new THREE.Quaternion();
+  const make = () => {
+    const p = new GlassPanel(controls, { width: 0.3, height: 0.1, fadeS: 0.2 });
+    p.place(new THREE.Vector3(0, 1.1, 0.4), facing);
+    return p;
+  };
+
+  it('fades in when asked, and only takes touches once mostly shown', () => {
+    const p = make();
+    const at = p.pointOf('wave')!;
+    expect(p.object.visible).toBe(false);
+    expect(p.controlAt(at)).toBeNull();
+    p.show(true);
+    p.update(0.05);
+    expect(p.object.visible).toBe(true);
+    expect(p.touchable).toBe(false);
+    p.update(0.1);
+    expect(p.controlAt(at)?.id).toBe('wave');
+    expect(p.controlAt(new THREE.Vector3(0, 1.1 + 0.2, 0.4))).toBeNull(); // above the panel
+    // Round pads: the edge of the circle counts, the corner of its bounding square does not.
+    expect(p.controlAt(at.clone().add(new THREE.Vector3(0.04, 0, 0)))?.id).toBe('wave');
+    expect(p.controlAt(at.clone().add(new THREE.Vector3(0.036, 0.036, 0)))).toBeNull();
+    p.show(false);
+    expect(p.controlAt(at)).toBeNull(); // fading out: no more touches
+    p.update(0.3);
+    expect(p.object.visible).toBe(false);
+  });
+
+  it('flips toggles from either side and refuses presses while hidden', () => {
+    const p = make();
+    expect(p.press('lights', 'user')).toBeNull();
+    p.show(true);
+    p.update(1);
+    expect(p.press('lights', 'user')!.control.on).toBe(false);
+    expect(p.press('lights', 'avatar')!.control.on).toBe(true);
+    expect(p.press('wave', 'avatar')!.control.on).toBeUndefined();
+    expect(p.press('nope', 'user')).toBeNull();
+  });
+
+  it('puts each control where a fingertip tapping its centre lands', () => {
+    const p = make();
+    p.show(true);
+    p.update(1);
+    const tap = new IkScreenTap(armed());
+    const seen: string[] = [];
+    for (const c of controls) {
+      const target = p.pointOf(c.id)!;
+      expect(target.z).toBeCloseTo(0.4); // on the glass
+      const pressed = tap.tap(target, FORWARD, (pt) => seen.push(p.controlAt(pt)?.id ?? 'missed'))!;
+      expect(pressed.distanceTo(target)).toBeLessThan(1e-6); // within reach
+      while (tap.playing) tap.update(1 / 60);
+    }
+    expect(seen).toEqual(['lights', 'wave']);
   });
 });
