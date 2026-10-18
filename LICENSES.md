@@ -6,7 +6,8 @@ Every component is open source. Keep this file current when adding a library or 
 
 | Asset | Source | Licence | Notes |
 |---|---|---|---|
-| `web/public/avatars/jimmy.vrm` | [100Avatars](https://github.com/PolygonalMind/100Avatars) #003 "Jimmy" by Polygonal Mind | CC BY 4.0 (repository licence; the VRM metadata says CC0) | Unmodified. Attribution: "Jimmy" by Polygonal Mind, from 100Avatars. Polygonal Mind asks that the avatars are not sold as-is. |
+| `web/public/avatars/cool-alien.vrm` (default avatar) | [100Avatars](https://github.com/PolygonalMind/100Avatars) #002 "Cool Alien" by Polygonal Mind | CC BY 4.0 (repository licence; the VRM metadata says CC0) | Unmodified. Attribution: "Cool Alien" by Polygonal Mind, from 100Avatars. Polygonal Mind asks that the avatars are not sold as-is. |
+| `web/public/avatars/jimmy.vrm` (`?model=jimmy`) | [100Avatars](https://github.com/PolygonalMind/100Avatars) #003 "Jimmy" by Polygonal Mind | CC BY 4.0 (repository licence; the VRM metadata says CC0) | Unmodified. Attribution: "Jimmy" by Polygonal Mind, from 100Avatars. Polygonal Mind asks that the avatars are not sold as-is. |
 | `web/public/animations/ual.glb` | [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) (free Standard version) by Quaternius | CC0 1.0 | 9 clips and the skeleton, mesh removed, built with `web/scripts/build-animations.ts`. Taken from the [glTF mirror](https://github.com/J-Ponzo/gltf-universal-animation-library) of the itch.io download. |
 | Whisper model (not committed; downloaded on first start) | [Systran/faster-whisper-base.en](https://huggingface.co/Systran/faster-whisper-base.en), converted from OpenAI Whisper | MIT | Any faster-whisper model can be set in `config/backend.yaml`. |
 | Local LLM weights (optional, pulled by Ollama) | e.g. Qwen2.5 1.5B Instruct | Apache-2.0 | Check each model's licence before switching. |

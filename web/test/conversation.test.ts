@@ -168,6 +168,18 @@ describe('gestures', () => {
     expect(done).toEqual([false]);
   });
 
+  it('tilts the head up towards a target above it, the other way on +Z rigs', () => {
+    const tilts = [true, false].map((negZ) => {
+      const a = rigged(negZ);
+      const g = new ProceduralGestures(a);
+      g.lookAt(new THREE.Vector3(0, 2, 1));
+      for (let t = 0; t < 1; t += 1 / 30) g.update(1 / 30);
+      return new THREE.Euler().setFromQuaternion(a.bone('head')!.quaternion).x;
+    });
+    expect(tilts[0]).toBeGreaterThan(0.2);
+    expect(tilts[1]).toBeLessThan(-0.2);
+  });
+
   it('mirrors poses for rigs that face +Z', () => {
     const neg = rigged(true);
     const pos = rigged(false);
