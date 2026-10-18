@@ -428,7 +428,10 @@ function usePanel(id: string, source: 'user' | 'avatar'): void {
 
 /** The server asks the avatar to press a control: it reaches out and taps it through the glass. */
 function pressControl(data: ServerMsg<'press_control'>['data']): void {
-  const fail = (reason: string) => net.send('command_cancelled', { cmd_id: data.cmd_id, reason });
+  const fail = (reason: string) => {
+    net.send('command_cancelled', { cmd_id: data.cmd_id, reason });
+    hud.status.textContent = `Kamari didn't press ${data.control}: ${reason.replace('_', ' ')}`;
+  };
   if (!panel?.controls.some((c) => c.id === data.control)) return fail(`unknown control ${data.control}`);
   const point = panel.touchable && panel.pointOf(data.control);
   if (!point) return fail('panel_hidden');
