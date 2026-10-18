@@ -157,6 +157,9 @@ describe('the panel on the glass', () => {
     p.update(0.1);
     expect(p.controlAt(at)?.id).toBe('wave');
     expect(p.controlAt(new THREE.Vector3(0, 1.1 + 0.2, 0.4))).toBeNull(); // above the panel
+    // Round pads: the edge of the circle counts, the corner of its bounding square does not.
+    expect(p.controlAt(at.clone().add(new THREE.Vector3(0.04, 0, 0)))?.id).toBe('wave');
+    expect(p.controlAt(at.clone().add(new THREE.Vector3(0.036, 0.036, 0)))).toBeNull();
     p.show(false);
     expect(p.controlAt(at)).toBeNull(); // fading out: no more touches
     p.update(0.3);

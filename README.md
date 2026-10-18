@@ -105,7 +105,7 @@ dragging to touch). `?model=jimmy` brings back the earlier human avatar, `?touch
 ripples off.
 
 While Kamari stands at the centre of the room, a translucent panel fades in on the glass in front of
-its chest, and fades out when it walks away. You press its controls by tapping them; Kamari presses
+its chest, and fades out when it walks away. Its controls are round glass pads. You press them by tapping; Kamari presses
 them from its side with a fingertip, when you ask it to (the LLM has a `press_control` tool) or when
 you type `/press lights`. Every press goes to the server, and the LLM hears about yours on its next
 turn. The controls are placeholders for now (Lights dims the room, Wave and Nod make Kamari gesture)
