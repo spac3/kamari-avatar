@@ -48,7 +48,7 @@ const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 50);
 const controls = new OrbitControls(camera, canvas);
 controls.target.set(0, 1.0, -0.6);
 controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.49;
+controls.maxPolarAngle = cfg.debug ? Math.PI * 0.49 : Math.PI / 2; // the fixed view looks straight ahead
 controls.minDistance = 0.6;
 controls.maxDistance = 9;
 // The screen is a window onto the avatar: a fixed view, and touches go to the glass. ?debug orbits.
@@ -243,21 +243,26 @@ function locationPoint(name: string): THREE.Vector3 | null {
   return loc ? new THREE.Vector3(loc.position.x, 1.3, loc.position.z) : null;
 }
 
+// One timer for every look (server look_at, glances at touches), so a short glance never ends a longer look early.
 let lookTimer: ReturnType<typeof setTimeout> | null = null;
-function lookAt(data: ServerMsg<'look_at'>['data']): void {
-  const target = data.target.location ? locationPoint(data.target.location) : data.target.point ? new THREE.Vector3(data.target.point.x, 1.3, data.target.point.z) : camera.position;
+function lookFor(target: THREE.Vector3 | null, ms: number): void {
   gestures.lookAt(target);
   if (lookTimer) clearTimeout(lookTimer);
-  lookTimer = setTimeout(() => gestures.lookAt(null), 4000); // then back to facing ahead
+  lookTimer = setTimeout(() => gestures.lookAt(null), ms); // then back to facing ahead
+}
+
+function lookAt(data: ServerMsg<'look_at'>['data']): void {
+  const target = data.target.location ? locationPoint(data.target.location) : data.target.point ? new THREE.Vector3(data.target.point.x, 1.3, data.target.point.z) : camera.position;
+  lookFor(target, 4000);
   net.send('ack', { cmd_id: data.cmd_id });
 }
 
 function gesture(data: ServerMsg<'gesture'>['data']): void {
   if (data.name === 'tap') {
-    const ok = avatarTap(null, (completed) =>
+    const ok = avatarTap(null, (completed, reason) =>
       completed
         ? net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name })
-        : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'replaced' }),
+        : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: reason ?? 'interrupted' }),
     );
     if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'cannot tap while walking' });
     return;
@@ -277,14 +282,9 @@ function gesture(data: ServerMsg<'gesture'>['data']): void {
 // Each touch draws ripples and reaches glass.onTouch, where touches will make things happen.
 // Screen positions, not world points: the glass moves with the avatar and the camera.
 let lastUserTouch: { x: number; y: number; at: number } | null = null;
-let pendingTap: { at: { x: number; y: number } | null; onDone?: (completed: boolean) => void } | null = null;
-let glanceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function glanceAt(point: THREE.Vector3, ms: number): void {
-  gestures.lookAt(point);
-  if (glanceTimer) clearTimeout(glanceTimer);
-  glanceTimer = setTimeout(() => gestures.lookAt(null), ms);
-}
+/** Reports how a tap ended: completed, or not and why. Called exactly once per tap. */
+type TapDone = (completed: boolean, reason?: string) => void;
+let pendingTap: { at: { x: number; y: number } | null; onDone?: TapDone } | null = null;
 
 /** A spot on the glass in front of the chest, a little to one side: easy reach for short arms. */
 function somewhereInReach(): THREE.Vector3 | null {
@@ -296,43 +296,57 @@ function somewhereInReach(): THREE.Vector3 | null {
   return glass.onGlass(p);
 }
 
+/** Heading that faces the screen, and how far off it the avatar is now (degrees). */
+function screenFacing(): { deg: number; off: number } {
+  const deg = (Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI;
+  return { deg, off: Math.abs(((deg - loco.headingDeg + 540) % 360) - 180) };
+}
+
 /**
  * The avatar taps the glass: at a screen position, back where the person just touched, or somewhere
- * in reach. Turns to face the screen first and plans the reach once facing it. False if walking.
+ * in reach. Queued until it stands still facing the screen (the loop turns it and starts the tap).
+ * False, with no `onDone`, if it is walking; otherwise `onDone` reports the outcome.
  */
-function avatarTap(at: { x: number; y: number } | null, onDone?: (completed: boolean) => void): boolean {
+function avatarTap(at: { x: number; y: number } | null, onDone?: TapDone): boolean {
   if (loco.moving) return false;
-  pendingTap?.onDone?.(false);
+  cancelPendingTap('replaced');
   pendingTap = { at, onDone };
-  const facing = (Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI;
-  const off = Math.abs(((facing - loco.headingDeg + 540) % 360) - 180);
-  if (!loco.cmd && off > 5) loco.face(facing);
-  if (!loco.cmd) return startPendingTap();
+  tryPendingTap();
   return true;
 }
 
-/** Plan and start the waiting tap, once the avatar stands still facing the screen. */
-function startPendingTap(): boolean {
+function cancelPendingTap(reason: string): void {
   const p = pendingTap;
-  if (!p) return false;
+  pendingTap = null;
+  p?.onDone?.(false, reason);
+}
+
+/** Start the waiting tap if the avatar stands facing the screen, else turn it (once per frame call). */
+function tryPendingTap(): void {
+  if (!pendingTap || loco.cmd) return;
+  const { deg, off } = screenFacing();
+  if (off > 5) {
+    loco.face(deg);
+    return;
+  }
+  const p = pendingTap;
   pendingTap = null;
   const recent = lastUserTouch && performance.now() - lastUserTouch.at < 10_000 ? lastUserTouch : null;
   const spot = p.at ?? recent;
   const target = spot ? glass.pointAt(spot.x, spot.y) : somewhereInReach();
-  const pressed = target && tapper.tap(target, glass.normal, (pt) => glass.touch('avatar', pt), p.onDone);
+  const pressed = target && tapper.tap(target, glass.normal, (pt) => glass.touch('avatar', pt), (c) => p.onDone?.(c, c ? undefined : 'interrupted'));
   if (!pressed) {
-    p.onDone?.(false);
-    return false;
+    p.onDone?.(false, 'out of reach');
+    return;
   }
-  glanceAt(pressed, 1800);
-  return true;
+  lookFor(pressed, 1800);
 }
 
 glass.onTouch((t: ScreenTouch) => {
   hud.status.textContent = `${t.source === 'user' ? 'You' : 'Kamari'} touched the screen at ${Math.round(t.x * 100)}%, ${Math.round(t.y * 100)}%`;
   if (t.source === 'user') {
     lastUserTouch = { x: t.x, y: t.y, at: performance.now() };
-    glanceAt(t.point, 1500);
+    lookFor(t.point, 1500);
   }
 });
 
@@ -366,7 +380,7 @@ function command(text: string): void {
     // "/tap" or "/tap 0.3 0.6" (screen position, 0..1 from the top left): works offline too.
     const at = tap[1] ? { x: Number(tap[1]), y: Number(tap[2]) } : null;
     if (at && ![at.x, at.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) hud.status.textContent = 'Usage: /tap, or /tap x y with x and y between 0 and 1';
-    else if (!avatarTap(at)) hud.status.textContent = "Can't tap right now";
+    else if (!avatarTap(at, (ok, reason) => !ok && (hud.status.textContent = `Didn't tap: ${reason}`))) hud.status.textContent = "Can't tap while walking";
     return;
   }
   if (net.state === 'open') {
@@ -469,8 +483,10 @@ async function start(): Promise<void> {
   net.onState((s) => (hud.conn.textContent = s));
   net.on('walk_to', (m) => walk(m.data));
   net.on('stop_moving', (m) => {
+    cancelPendingTap('stopped');
+    tapper.cancel();
     const stopped = loco.stop();
-    if (stopped) net.send('command_cancelled', { cmd_id: stopped.cmdId, reason: 'stopped' });
+    if (stopped?.cmdId) net.send('command_cancelled', { cmd_id: stopped.cmdId, reason: 'stopped' }); // turns on the spot have no id
     net.send('ack', { cmd_id: m.data.cmd_id });
   });
   net.on('speech_start', (m) => speech.onStart(m));
@@ -552,10 +568,11 @@ function loop(time?: number): void {
   acc = 0;
 
   loco.update(step);
-  if (pendingTap && loco.moving) {
-    pendingTap.onDone?.(false); // a walk took over before the turn to the screen finished
-    pendingTap = null;
-  } else if (pendingTap && !loco.cmd) startPendingTap();
+  if (loco.moving) {
+    // A walk took over: drop a tap still waiting for the turn, and pull back a finger on the glass.
+    cancelPendingTap('walking');
+    tapper.cancel();
+  } else tryPendingTap();
   speech.update();
   anim.play(loco.moving ? (loco.cmd?.speed === 'run' ? 'run' : 'walk') : speech.talking ? 'talk' : 'idle', { fadeS: 0.3 });
   if (!loco.moving) anim.setTimeScale(1);

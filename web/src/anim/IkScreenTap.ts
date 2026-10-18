@@ -66,6 +66,14 @@ export class IkScreenTap implements TapPlayer {
     return pressed.clone();
   }
 
+  cancel(): void {
+    if (!this.playing) return;
+    const done = this.onDone;
+    this.playing = false;
+    this.onDone = this.onContact = undefined;
+    done?.(false);
+  }
+
   update(dt: number): void {
     // Bones nothing else animates still hold last frame's offset: put them back first.
     for (const [node, { base, left }] of this.touched) if (node.quaternion.equals(left)) node.quaternion.copy(base);

@@ -138,6 +138,8 @@ export interface TapPlayer {
    * when the fingertip meets the glass, `onDone(completed)` when the arm is back or the tap was replaced.
    */
   tap(target: THREE.Vector3, normal: THREE.Vector3, onContact: (point: THREE.Vector3) => void, onDone?: (completed: boolean) => void): THREE.Vector3 | null;
+  /** Stop a running tap (`onDone(false)`); the arm goes back to the clip's pose on the next update. */
+  cancel(): void;
   /** Call after the gestures' update and before the avatar's. */
   update(dt: number): void;
 }

@@ -65,6 +65,23 @@ describe('tapping the screen', () => {
     expect(tap.tap(new THREE.Vector3(0, 1.4, 3), FORWARD, () => {})).toBeNull(); // glass too far away
   });
 
+  it('can be called off mid-reach, giving the arm back to the clip', () => {
+    const a = armed();
+    const tap = new IkScreenTap(a);
+    const done: boolean[] = [];
+    const contacts: unknown[] = [];
+    tap.tap(new THREE.Vector3(-0.15, 1.3, 0.35), FORWARD, (p) => contacts.push(p), (c) => done.push(c));
+    for (let i = 0; i < 20; i++) tap.update(1 / 60);
+    expect(a.bone('rightUpperArm')!.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(0.1);
+    tap.cancel();
+    tap.cancel(); // once only
+    expect(done).toEqual([false]);
+    tap.update(1 / 60);
+    expect(tap.playing).toBe(false);
+    expect(contacts).toHaveLength(0);
+    expect(a.bone('rightUpperArm')!.quaternion.angleTo(new THREE.Quaternion())).toBeLessThan(1e-6);
+  });
+
   it('reports a tap replaced by another', () => {
     const tap = new IkScreenTap(armed());
     const done: boolean[] = [];
