@@ -64,9 +64,11 @@ Open http://localhost:5173 and tap **Tap to talk to Kamari**; the browser asks f
 Then just talk. On a desktop the mic stays open (**Hands-free: on**): Kamari answers when you pause,
 and you can talk over it to interrupt. The talk button mutes and unmutes the mic, and glows while it
 hears a voice. Turn hands-free off to hold the button (or the space bar) while you speak instead;
-phones start that way. The text box sends typed messages the same way. Captions show what was heard
-and what Kamari says, and the **reply in** chip shows the time from the end of your speech to the
-first audio.
+phones start that way. The text box sends typed messages the same way. The chat window (bottom left;
+across the bottom on a phone) shows what was heard and what Kamari says, and after each turn the
+conversation's total LLM tokens in and out, as the provider reports them (`stream_usage: false` turns
+the request for them off on an OpenAI-compatible server that rejects it). The **reply in** chip shows
+the time from the end of your speech to the first audio.
 
 ### Hands-free and interrupting
 

@@ -46,6 +46,10 @@ server = {
   "turn_timing": obj({"turn_id": S(), "stt_ms": I(), "llm_first_token_ms": I(), "first_sentence_ms": I(),
                       "tts_first_audio_ms": I(), "first_audio_ms": I(), "total_ms": I()}, required=["turn_id"],
                      description="Latency of one conversational turn, each stage in ms from the end of the user's speech"),
+  "token_usage": obj({"turn_id": S(), "input_tokens": I(minimum=0), "output_tokens": I(minimum=0),
+                      "total_input_tokens": I(minimum=0, description="whole conversation so far"),
+                      "total_output_tokens": I(minimum=0, description="whole conversation so far")},
+                     description="LLM tokens one turn used (every round of it), and the conversation's running total, as the provider counted them"),
 }
 client = {
   "hello": obj({"client": S(), "version": S(), "room_id": S(), "device": S(enum=["desktop","mobile"]),

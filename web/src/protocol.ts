@@ -21,7 +21,8 @@ export type ServerMessage =
   | ErrorMessage
   | StateSyncMessage
   | PongMessage
-  | TurnTimingMessage;
+  | TurnTimingMessage
+  | TokenUsageMessage;
 /**
  * Oculus 15-viseme set
  */
@@ -425,6 +426,36 @@ export interface TurnTimingData {
   tts_first_audio_ms?: number;
   first_audio_ms?: number;
   total_ms?: number;
+}
+export interface TokenUsageMessage {
+  v: 1;
+  type: "token_usage";
+  id: string;
+  /**
+   * Unix ms
+   */
+  ts: number;
+  data: TokenUsageData;
+  /**
+   * Monotonic per session, used by resume
+   */
+  seq: number;
+}
+/**
+ * LLM tokens one turn used (every round of it), and the conversation's running total, as the provider counted them
+ */
+export interface TokenUsageData {
+  turn_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  /**
+   * whole conversation so far
+   */
+  total_input_tokens: number;
+  /**
+   * whole conversation so far
+   */
+  total_output_tokens: number;
 }
 export interface HelloMessage {
   v: 1;

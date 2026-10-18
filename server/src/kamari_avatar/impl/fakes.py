@@ -23,6 +23,7 @@ from ..interfaces import (
     ToolResult,
     ToolSpec,
     Transcript,
+    Usage,
 )
 from ..registry import register
 
@@ -58,10 +59,11 @@ class FakeLLM:
     """Streams a fixed reply word by word, then optional tool calls (`tool_call` or a `tool_calls` list)."""
 
     def __init__(self, reply: str = "Hello!", tool_call: dict[str, Any] | None = None,
-                 tool_calls: list[dict[str, Any]] | None = None, delay_s: float = 0.0) -> None:
+                 tool_calls: list[dict[str, Any]] | None = None, delay_s: float = 0.0, usage: bool = True) -> None:
         self.reply = reply
         self.tool_calls = list(tool_calls or []) + ([tool_call] if tool_call else [])
         self.delay_s = delay_s
+        self.usage = usage
 
     async def stream(self, messages: Sequence[ChatMessage], tools: Sequence[ToolSpec]) -> AsyncIterator[LLMEvent]:
         words = self.reply.split(" ")
@@ -73,7 +75,10 @@ class FakeLLM:
         calls = [c for c in self.tool_calls if c["name"] in names]
         for i, c in enumerate(calls):
             yield ToolCall(f"call_fake_{i + 1}", c["name"], dict(c.get("arguments", {})))
-        yield Done("tool_calls" if calls else "stop")
+        # Made-up but plausible counts (about four characters a token) so the chat has a total to show.
+        usage = Usage(sum(len(m.content) for m in messages) // 4 + 4 * len(messages),
+                      len(self.reply) // 4 + 1 + 20 * len(calls)) if self.usage else None
+        yield Done("tool_calls" if calls else "stop", usage)
 
 
 # Rough phoneme stand-ins per letter so fake speech still produces moving visemes.

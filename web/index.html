@@ -15,18 +15,16 @@
       <span class="chip">reply in <b id="latency">-</b></span>
       <span class="chip" id="status">Loading…</span>
     </div>
-    <div class="dock">
-      <div class="captions" aria-live="polite">
-        <p><b>You</b> <span id="you"></span></p>
-        <p><b>Kamari</b> <span id="kamari"></span></p>
-      </div>
+    <section class="dock" aria-label="Chat with Kamari">
+      <header class="chat-head"><b>Chat</b> <span id="tokens"></span></header>
+      <ol id="log" aria-live="polite"></ol>
       <div class="panel">
         <button id="talk" type="button" data-state="idle"><span>Hold to talk</span></button>
         <button id="mode" type="button" class="secondary" aria-pressed="false">Hands-free</button>
         <span id="locations" style="display: contents"></span><button id="toggle-nav" class="secondary">Navmesh</button>
         <form id="say"><input name="text" aria-label="Message to Kamari" placeholder="Type to Kamari, or /go to window" autocomplete="off" enterkeyhint="send" /><button>Send</button></form>
       </div>
-    </div>
+    </section>
     <div id="overlay"><button id="start">Tap to talk to Kamari</button></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

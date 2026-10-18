@@ -32,7 +32,7 @@ from typing import Any, Protocol
 
 from .config import Components, DirectorSettings
 from .echo import is_echo
-from .interfaces import AudioSegment, ChatMessage, Done, TextDelta, ToolCall, ToolResult, ToolSpec
+from .interfaces import AudioSegment, ChatMessage, Done, TextDelta, ToolCall, ToolResult, ToolSpec, Usage
 from .protocol import SpeechChunkData, Vec2, VisemeKey, WalkToData
 from .session import Session
 from .tools import AVATAR, USER, avatar_tools, normalize, panel, validate
@@ -119,6 +119,7 @@ class _Turn:
     transcript: str = ""
     reply: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
+    usage: Usage | None = None  # tokens this turn's LLM calls used, if the provider reports them
 
 
 @dataclass
@@ -144,6 +145,7 @@ class Director:
     stats: collections.Counter[str] = field(default_factory=collections.Counter)
     _tool_sources: dict[str, ToolSpec] = field(default_factory=dict)
     _background: set[asyncio.Task[None]] = field(default_factory=set)
+    usage: Usage = field(default_factory=Usage)  # the whole conversation's tokens so far
 
     # ------------------------------------------------------------ commands
 
@@ -363,6 +365,8 @@ class Director:
             if speech["type"] != "speech_finished":
                 event |= {"type": "turn_failed", "error": f"the reply did not finish playing ({speech['type']})"}
         event["timing"] = turn.timing.report()
+        if turn.usage is not None:
+            event["usage"] = {"input_tokens": turn.usage.input_tokens, "output_tokens": turn.usage.output_tokens}
         return event
 
     async def _new_turn(self, reason: str) -> _Turn:
@@ -426,6 +430,11 @@ class Director:
                 turn.utterance.sentences.put_nowait(None)
             if turn.utterance is None or "first_audio" in turn.timing.marks:
                 self._report(turn)
+            if turn.usage is not None:
+                self._send_later("token_usage", {
+                    "turn_id": turn.id, "input_tokens": turn.usage.input_tokens,
+                    "output_tokens": turn.usage.output_tokens, "total_input_tokens": self.usage.input_tokens,
+                    "total_output_tokens": self.usage.output_tokens})
 
     async def _llm_round(self, turn: _Turn, tools: list[ToolSpec]) -> bool:
         """One LLM call. Returns True when tool results need another round."""
@@ -443,6 +452,9 @@ class Director:
                 turn.timing.mark("llm_first_token")
                 calls.append(ev)
             elif isinstance(ev, Done):
+                if ev.usage is not None:
+                    turn.usage = (turn.usage or Usage()) + ev.usage
+                    self.usage += ev.usage
                 break
         for piece in chunker.flush():
             self._say_piece(turn, piece)
@@ -599,7 +611,11 @@ class Director:
         self.timings.append(report | {"at": round(time.time(), 3)})
         log.info("turn %s latency: %s", turn.id,
                  ", ".join(f"{k[:-3]} {v} ms" for k, v in report.items() if k != "turn_id"))
-        task = asyncio.get_running_loop().create_task(self.out.send_json("turn_timing", report))
+        self._send_later("turn_timing", report)
+
+    def _send_later(self, type_: str, data: dict[str, Any]) -> None:
+        """Send without waiting: also works from a turn that is being cancelled."""
+        task = asyncio.get_running_loop().create_task(self.out.send_json(type_, data))
         self._background.add(task)
         task.add_done_callback(self._background.discard)
 

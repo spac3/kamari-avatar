@@ -85,7 +85,8 @@ async def test_fake_llm_streams_text_then_tool_call(comps):
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert text == "Sure, heading to the sofa now."
     assert ToolCall("call_fake_1", "walk_to", {"location": "sofa"}) in events
-    assert events[-1] == Done("tool_calls")
+    done = events[-1]
+    assert isinstance(done, Done) and done.reason == "tool_calls" and done.usage.output_tokens > 0
 
 
 async def test_fake_tts_and_visemes_line_up(comps):

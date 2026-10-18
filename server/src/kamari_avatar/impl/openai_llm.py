@@ -17,7 +17,7 @@ import os
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-from ..interfaces import ChatMessage, Done, LLMEvent, TextDelta, ToolCall, ToolSpec
+from ..interfaces import ChatMessage, Done, LLMEvent, TextDelta, ToolCall, ToolSpec, Usage
 from ..registry import register
 
 log = logging.getLogger(__name__)
@@ -35,11 +35,14 @@ class OpenAICompatibleLLM:
       timeout_s    per request
       extra_body   provider-specific fields sent as is (e.g. {reasoning_effort: none})
       strip_think  drop <think>...</think> blocks reasoning models put in the text
+      stream_usage ask for token counts at the end of the stream (stream_options.include_usage);
+                   turn off for a server that rejects the option
     """
 
     def __init__(self, model: str, *, base_url: str | None = None, api_key_env: str | None = "LLM_API_KEY",
                  temperature: float = 0.6, max_tokens: int = 400, timeout_s: float = 30.0,
-                 extra_body: dict[str, Any] | None = None, strip_think: bool = True, http_client: Any = None) -> None:
+                 extra_body: dict[str, Any] | None = None, strip_think: bool = True, stream_usage: bool = True,
+                 http_client: Any = None) -> None:
         try:
             from openai import AsyncOpenAI
         except ImportError as e:
@@ -54,6 +57,7 @@ class OpenAICompatibleLLM:
         self.max_tokens = max_tokens
         self.extra_body = dict(extra_body or {})
         self.strip_think = strip_think
+        self.stream_usage = stream_usage
         self._client = AsyncOpenAI(api_key=key, base_url=base_url, timeout=timeout_s, max_retries=1,
                                    http_client=http_client)
 
@@ -64,14 +68,18 @@ class OpenAICompatibleLLM:
                                                                  "parameters": t.parameters}} for t in tools]
         if self.extra_body:
             kwargs["extra_body"] = self.extra_body
+        if self.stream_usage:
+            kwargs["stream_options"] = {"include_usage": True}
         stream = await self._client.chat.completions.create(
             model=self.model, messages=[_to_openai(m) for m in messages], stream=True,
             temperature=self.temperature, max_tokens=self.max_tokens, **kwargs)
         calls: dict[int, dict[str, str]] = {}
         think = ThinkFilter() if self.strip_think else None
         reason = "stop"
+        usage: Usage | None = None
         try:
             async for chunk in stream:
+                usage = _usage(chunk) or usage
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
@@ -94,7 +102,19 @@ class OpenAICompatibleLLM:
         for i in sorted(calls):
             c = calls[i]
             yield ToolCall(c["id"] or f"call_{i}", c["name"], _parse_args(c["arguments"]))
-        yield Done("tool_calls" if calls else reason)
+        yield Done("tool_calls" if calls else reason, usage)
+
+
+def _usage(chunk: Any) -> Usage | None:
+    """Token counts if this chunk carries them: the standard `usage` (the last chunk, with
+    include_usage), or Groq's `x_groq.usage`."""
+    u = getattr(chunk, "usage", None)
+    if u is None:
+        u = ((getattr(chunk, "model_extra", None) or {}).get("x_groq") or {}).get("usage")
+    if u is None:
+        return None
+    get = u.get if isinstance(u, dict) else lambda k: getattr(u, k, None)
+    return Usage(int(get("prompt_tokens") or 0), int(get("completion_tokens") or 0))
 
 
 def _parse_args(raw: str) -> dict[str, Any]:
