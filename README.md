@@ -32,6 +32,8 @@ web/                          Three.js client (Vite + TypeScript)
   src/speech/                 audio scheduling and viseme timeline lip sync on the audio clock
   src/mic/                    mic capture (AudioWorklet, 16 kHz PCM16) and push-to-talk
   src/anim/ProceduralGestures upper-body gestures and head turns layered over the clips
+  src/anim/IkScreenTap        reaching out and tapping the screen (two-bone IK, finger pointing)
+  src/touch/                  the screen as glass between viewer and avatar; ripple circles on touch
   public/animations/ual.glb   clips (built by scripts/build-animations.ts)
 ```
 
@@ -58,6 +60,20 @@ Open http://localhost:5173 and tap **Tap to talk to Kamari**. Hold **Hold to tal
 bar) while you speak, and let go to send. The first press asks for the microphone. The text box
 sends typed messages the same way. Captions show what was heard and what Kamari says, and the
 **reply in** chip shows the time from the end of your speech to the first audio.
+
+### Kamari behind the glass
+
+Kamari is a small green alien standing just behind your screen, facing you, framed from the waist
+up. The screen works like a pane of glass that both of you can touch: tap or click anywhere and
+circles ripple out from that spot (teal) while Kamari glances at it; ask Kamari to tap the screen
+(or type `/tap`, or `/tap 0.4 0.6` for a spot given as fractions of the screen from the top left) and
+it reaches out and presses the glass from its side with one finger (green ripples). Without a spot it
+taps back where you just touched, or somewhere in front of its chest. Its arms are short, so a spot
+out of reach moves to the nearest one it can press. Every touch, from either side, goes to
+`glass.onTouch` in `web/src/main.ts` with its side and screen position: that is where touches will
+make things happen. The view is fixed; `?debug` lets you orbit the camera again (click without
+dragging to touch). `?model=jimmy` brings back the earlier human avatar, `?touchfx=none` turns the
+ripples off.
 
 Debug controls: the place buttons and `/` commands in the text box drive the avatar without the
 LLM (`/go to window`, `/say Hello`, `/gesture wave`). Add `?debug` to show the navmesh, location

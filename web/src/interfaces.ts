@@ -109,6 +109,39 @@ export interface GesturePlayer {
   update(dt: number): void;
 }
 
+/** Who touched the screen: the person (pointer on their side) or the avatar (its finger on the inside). */
+export type TouchSource = 'user' | 'avatar';
+
+export interface ScreenTouch {
+  source: TouchSource;
+  /** Screen position, 0..1 from the top left. */
+  x: number;
+  y: number;
+  /** Where that is on the glass, world space. */
+  point: THREE.Vector3;
+}
+
+/** Draws something where the screen was touched (ripples, sparks...). */
+export interface TouchEffect {
+  readonly object: THREE.Object3D;
+  /** `facing`: the glass orientation (the camera's), so flat effects face the viewer. */
+  spawn(touch: ScreenTouch, facing: THREE.Quaternion): void;
+  update(dt: number): void;
+}
+
+/** The avatar reaching out and pressing a point on the glass with a fingertip. */
+export interface TapPlayer {
+  readonly playing: boolean;
+  /**
+   * Press `target` (world space); `normal` points from the glass towards the viewer. Returns the point
+   * actually pressed (moved within reach), or null if the avatar cannot tap now. `onContact` fires
+   * when the fingertip meets the glass, `onDone(completed)` when the arm is back or the tap was replaced.
+   */
+  tap(target: THREE.Vector3, normal: THREE.Vector3, onContact: (point: THREE.Vector3) => void, onDone?: (completed: boolean) => void): THREE.Vector3 | null;
+  /** Call after the gestures' update and before the avatar's. */
+  update(dt: number): void;
+}
+
 export interface AudioFrame { kind: number; streamId: number; seq: number; pcm: Int16Array }
 
 export type ConnectionState = 'offline' | 'connecting' | 'open' | 'reconnecting' | 'closed';

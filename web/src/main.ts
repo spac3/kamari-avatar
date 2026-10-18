@@ -12,7 +12,10 @@ import type {
   ProtocolClient,
   QualitySettings,
   RoomProvider,
+  ScreenTouch,
   ServerMsg,
+  TapPlayer,
+  TouchEffect,
   Vec2,
 } from './interfaces';
 import { BrowserLifecycle } from './lifecycle/BrowserLifecycle';
@@ -23,6 +26,7 @@ import { AdaptiveQuality, detectDevice, presetFor } from './quality/QualityProfi
 import { create } from './registry';
 import { loadManifest } from './room/manifest';
 import { SpeechPlayer } from './speech/SpeechPlayer';
+import { ScreenGlass } from './touch/ScreenGlass';
 import './style.css';
 
 const VERSION = '0.1.0';
@@ -45,8 +49,10 @@ const controls = new OrbitControls(camera, canvas);
 controls.target.set(0, 1.0, -0.6);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.49;
-controls.minDistance = 1.2;
+controls.minDistance = 0.6;
 controls.maxDistance = 9;
+// The screen is a window onto the avatar: a fixed view, and touches go to the glass. ?debug orbits.
+controls.enabled = cfg.debug;
 
 const hemi = new THREE.HemisphereLight(0xffffff, 0xb9a88f, 1.6);
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.8);
@@ -72,14 +78,40 @@ function resize(): void {
   const h = canvas.clientHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  // Portrait phones: pull the camera back so the avatar and room stay framed.
-  const portrait = h > w;
-  camera.fov = portrait ? 62 : 45;
+  camera.fov = h > w ? 55 : 40;
   camera.updateProjectionMatrix();
-  if (!started) {
-    camera.position.set(0, portrait ? 1.7 : 1.6, portrait ? 5.6 : 4.2);
-    controls.target.set(0, portrait ? 0.9 : 1.0, -0.6);
-  }
+  if (framed && !cfg.debug) frame();
+}
+
+// Waist-up portrait: the avatar faces the screen, its waist sits on the top edge of the controls at
+// the bottom (so the screen cuts it at the waist), and it is close enough to reach the glass.
+// Measured from the avatar once loaded, and again on resize.
+let framed = false;
+function frame(): void {
+  const body = avatar.object;
+  body.updateWorldMatrix(true, true);
+  const at = (bone: string, fallback: number) => avatar.bone(bone)?.getWorldPosition(new THREE.Vector3()).y ?? fallback;
+  const waist = (at('hips', 0.9) + at('spine', 1.0)) / 2 + 0.06;
+  const top = new THREE.Box3().setFromObject(body).max.y + 0.06;
+  // Screen fractions (from the top) the avatar spans: below the status chips, above the dock.
+  const h = canvas.clientHeight || 1;
+  const yTop = Math.min(0.3, document.querySelector('.hud')!.getBoundingClientRect().bottom / h + 0.02);
+  const yWaist = Math.max(0.6, document.querySelector('.dock')!.getBoundingClientRect().top / h);
+  const halfV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  // Room for the shoulders and a bit of arm on a narrow portrait screen.
+  const l = avatar.bone('leftUpperArm')?.getWorldPosition(new THREE.Vector3());
+  const r = avatar.bone('rightUpperArm')?.getWorldPosition(new THREE.Vector3());
+  const halfW = (l && r ? l.distanceTo(r) / 2 : 0.2) + 0.12;
+  const dist = Math.max((top - waist) / ((yWaist - yTop) * 2 * halfV), halfW / (halfV * camera.aspect));
+  const y = waist - (0.5 - yWaist) * 2 * dist * halfV; // looking straight ahead
+  // First time in front of the avatar's face; on later resizes from wherever the view is now.
+  const fwd = framed
+    ? camera.position.clone().sub(controls.target).setY(0).normalize()
+    : new THREE.Vector3(Math.sin(body.rotation.y), 0, Math.cos(body.rotation.y));
+  controls.target.set(body.position.x, y, body.position.z);
+  camera.position.copy(controls.target).addScaledVector(fwd, dist);
+  followOffset = null;
+  framed = true;
 }
 
 // ---------------------------------------------------------------- HUD
@@ -97,6 +129,10 @@ const nav = create<NavigationProvider>('navigation', cfg.navigation);
 const lipSync = create<LipSyncDriver>('lipsync', cfg.lipSync);
 const gestures = create<GesturePlayer>('gestures', { ...cfg.gestures, options: { ...cfg.gestures.options, avatar } });
 const mic = create<MicCapture>('mic', cfg.mic);
+const tapper = create<TapPlayer>('tap', { ...cfg.tap, options: { ...cfg.tap.options, avatar } });
+const touchFx = create<TouchEffect>('touchfx', cfg.touchFx);
+const glass = new ScreenGlass(camera, avatar.object, touchFx);
+scene.add(touchFx.object);
 
 const player = new WebAudioPlayer();
 const lifecycle = new BrowserLifecycle();
@@ -217,6 +253,15 @@ function lookAt(data: ServerMsg<'look_at'>['data']): void {
 }
 
 function gesture(data: ServerMsg<'gesture'>['data']): void {
+  if (data.name === 'tap') {
+    const ok = avatarTap(null, (completed) =>
+      completed
+        ? net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name })
+        : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'replaced' }),
+    );
+    if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'cannot tap while walking' });
+    return;
+  }
   // Gestures are for the user: turn to face them first when standing (a wave at the window would face away).
   if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
   const ok = gestures.play(data.name, (completed) =>
@@ -227,12 +272,79 @@ function gesture(data: ServerMsg<'gesture'>['data']): void {
   if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: `unknown gesture ${data.name}` });
 }
 
+// ---------------------------------------------------------------- touching the screen
+// Both sides of the glass can touch it: the person with a pointer, the avatar with a fingertip.
+// Each touch draws ripples and reaches glass.onTouch, where touches will make things happen.
+let lastUserTouch: { point: THREE.Vector3; at: number } | null = null;
+let glanceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function glanceAt(point: THREE.Vector3, ms: number): void {
+  gestures.lookAt(point);
+  if (glanceTimer) clearTimeout(glanceTimer);
+  glanceTimer = setTimeout(() => gestures.lookAt(null), ms);
+}
+
+/** A spot on the glass in front of the chest, a little to one side: easy reach for short arms. */
+function somewhereInReach(): THREE.Vector3 | null {
+  const chest = avatar.bone('upperChest') ?? avatar.bone('chest');
+  if (!chest) return glass.pointAt(0.5, 0.55);
+  const p = chest.getWorldPosition(new THREE.Vector3());
+  const side = new THREE.Vector3().crossVectors(glass.normal, new THREE.Vector3(0, 1, 0)).normalize();
+  p.addScaledVector(side, (Math.random() - 0.5) * 0.4).add(new THREE.Vector3(0, 0.05 + Math.random() * 0.12, 0));
+  return glass.onGlass(p);
+}
+
+/** The avatar taps the glass: at a screen position, back where the person just touched, or somewhere in reach. */
+function avatarTap(at: { x: number; y: number } | null, onDone?: (completed: boolean) => void): boolean {
+  if (loco.moving) return false;
+  if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
+  const recent = lastUserTouch && performance.now() - lastUserTouch.at < 10_000 ? lastUserTouch.point : null;
+  const target = at ? glass.pointAt(at.x, at.y) : (recent ?? somewhereInReach());
+  if (!target) return false;
+  const pressed = tapper.tap(target, glass.normal, (p) => glass.touch('avatar', p), onDone);
+  if (pressed) glanceAt(pressed, 1800);
+  return pressed !== null;
+}
+
+glass.onTouch((t: ScreenTouch) => {
+  hud.status.textContent = `${t.source === 'user' ? 'You' : 'Kamari'} touched the screen at ${Math.round(t.x * 100)}%, ${Math.round(t.y * 100)}%`;
+  if (t.source === 'user') {
+    lastUserTouch = { point: t.point, at: performance.now() };
+    glanceAt(t.point, 1500);
+  }
+});
+
+function userTouch(e: PointerEvent): void {
+  const rect = canvas.getBoundingClientRect();
+  const point = glass.pointAt((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+  if (point) glass.touch('user', point);
+}
+
+function wireTouches(): void {
+  // Debug mode orbits the camera by dragging, so only a click that did not move counts as a touch there.
+  let down: { x: number; y: number } | null = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!cfg.debug) userTouch(e);
+    else down = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (cfg.debug && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) userTouch(e);
+    down = null;
+  });
+}
+
 // ---------------------------------------------------------------- speech and conversation
 const speech = new SpeechPlayer(player, lipSync, (type, data) => net.send(type, data));
 const ptt = new PushToTalk(mic, net, () => speech.interrupt(), () => player.context, { tailMs: cfg.mic.options?.tailMs as number | undefined });
 
 /** Typed text goes to the LLM; "/go to sofa", "/say hi" and "/gesture wave" drive the avatar directly. Offline, only walking works. */
 function command(text: string): void {
+  const tap = /^\/tap(?:\s+([\d.]+)\s+([\d.]+))?$/i.exec(text);
+  if (tap) {
+    // "/tap" or "/tap 0.3 0.6" (screen position, 0..1 from the top left): works offline too.
+    if (!avatarTap(tap[1] ? { x: Number(tap[1]), y: Number(tap[2]) } : null)) hud.status.textContent = "Can't tap right now";
+    return;
+  }
   if (net.state === 'open') {
     net.send('user_text', { text });
     return;
@@ -303,7 +415,7 @@ async function start(): Promise<void> {
   started = true;
 
   const results = await Promise.allSettled([
-    avatar.load(`${base}${manifest.avatar.url}`),
+    avatar.load(`${base}${cfg.model ? `avatars/${cfg.model}.vrm` : manifest.avatar.url}`),
     nav.init(manifest, `${base}rooms/${manifest.room_id}/navmesh.bin`),
   ]);
   const failed = results.flatMap((r, i) => (r.status === 'rejected' ? [`${['avatar', 'navigation'][i]}: ${r.reason}`] : []));
@@ -322,6 +434,11 @@ async function start(): Promise<void> {
     navMesh.visible = cfg.debug;
     scene.add(navMesh);
   }
+  anim.play('idle');
+  anim.update(0);
+  frame();
+  wireTouches();
+  if (cfg.debug) Object.assign(window, { kamari: { scene, camera, controls, avatar, glass } }); // poke at it from the console
   avatar.lookAt(camera.position);
 
   hud.conn.textContent = net.state; // the tap may have connected while assets were loading
@@ -416,6 +533,8 @@ function loop(time?: number): void {
   if (!loco.moving) anim.setTimeScale(1);
   anim.update(step);
   gestures.update(step);
+  tapper.update(step);
+  touchFx.update(step);
   lipSync.update(player.context?.currentTime ?? 0, avatar);
   avatar.lookAt(camera.position);
   avatar.update(step);
