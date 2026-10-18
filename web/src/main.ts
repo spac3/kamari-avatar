@@ -5,6 +5,7 @@ import { configFromQuery, registerBuiltins } from './config';
 import type {
   AnimationLibrary,
   AvatarAdapter,
+  ClientData,
   GesturePlayer,
   GlassUi,
   LipSyncDriver,
@@ -27,7 +28,7 @@ import { PushToTalk } from './mic/PushToTalk';
 import { WebSocketProtocolClient } from './net/WebSocketProtocolClient';
 import { AdaptiveQuality, detectDevice, presetFor } from './quality/QualityProfile';
 import { create } from './registry';
-import { loadManifest } from './room/manifest';
+import { loadManifest, type PanelControl } from './room/manifest';
 import { SpeechPlayer } from './speech/SpeechPlayer';
 import { ScreenGlass } from './touch/ScreenGlass';
 import './style.css';
@@ -300,7 +301,9 @@ function playGesture(name: string, onDone?: (completed: boolean) => void): boole
 let lastUserTouch: { x: number; y: number; at: number } | null = null;
 /** Reports how a tap ended: completed, or not and why. Called exactly once per tap. */
 type TapDone = (completed: boolean, reason?: string) => void;
-let pendingTap: { at: { x: number; y: number } | null; onDone?: TapDone } | null = null;
+/** Where to tap: a screen position, or a glass point worked out when the tap starts (it moves with the avatar). */
+type TapAt = { x: number; y: number } | (() => THREE.Vector3 | null);
+let pendingTap: { at: TapAt | null; onDone?: TapDone } | null = null;
 
 /** A spot on the glass in front of the chest, a little to one side: easy reach for short arms. */
 function somewhereInReach(): THREE.Vector3 | null {
@@ -323,7 +326,7 @@ function screenFacing(): { deg: number; off: number } {
  * in reach. Queued until it stands still facing the screen (the loop turns it and starts the tap).
  * False, with no `onDone`, if it is walking; otherwise `onDone` reports the outcome.
  */
-function avatarTap(at: { x: number; y: number } | null, onDone?: TapDone): boolean {
+function avatarTap(at: TapAt | null, onDone?: TapDone): boolean {
   if (loco.moving) return false;
   cancelPendingTap('replaced');
   pendingTap = { at, onDone };
@@ -349,7 +352,7 @@ function tryPendingTap(): void {
   pendingTap = null;
   const recent = lastUserTouch && performance.now() - lastUserTouch.at < 10_000 ? lastUserTouch : null;
   const spot = p.at ?? recent;
-  const target = spot ? glass.pointAt(spot.x, spot.y) : somewhereInReach();
+  const target = typeof spot === 'function' ? spot() : spot ? glass.pointAt(spot.x, spot.y) : somewhereInReach();
   const pressed = target && tapper.tap(target, glass.normal, (pt) => glass.touch('avatar', pt), (c) => p.onDone?.(c, c ? undefined : 'interrupted'));
   if (!pressed) {
     p.onDone?.(false, 'out of reach');
@@ -390,8 +393,24 @@ function wireTouches(): void {
 // ---------------------------------------------------------------- the panel on the glass
 // A translucent row of controls that fades in while the avatar stands at the room's centre. Both
 // sides press it through the glass; the server hears every press (and the LLM can ask for one).
-/** The press the server asked the avatar for, until its fingertip lands on that control. */
-let pressCmd: { cmdId: string; control: string } | null = null;
+/**
+ * A press the server asked the avatar for. It waits while the panel fades in, then the avatar reaches
+ * for the control; the server hears the outcome once, after the arm is back and any gesture the
+ * control starts has played, so its next queued action does not cut in.
+ */
+interface PressRequest {
+  cmdId: string;
+  control: string;
+  reaching: boolean;
+  /** Set when the fingertip landed on the control: what to report. */
+  pressed: ClientData<'control_pressed'> | null;
+  waitedS: number;
+  done: boolean;
+}
+let pressReq: PressRequest | null = null;
+/** How long a press waits for a fading-in panel before giving up, seconds. */
+const PRESS_WAIT_S = 2;
+let panelWanted = false;
 /** Panel actions that wait for the avatar's arm to come back from the glass (gestures). */
 let afterTap: (() => void)[] = [];
 
@@ -399,53 +418,80 @@ function updatePanel(dt: number): void {
   if (!panel) return;
   const at = panelSpot?.position;
   const near = !!at && Math.hypot(avatar.object.position.x - at.x, avatar.object.position.z - at.z) <= manifest.panel!.radius_m;
-  panel.show(near && !loco.moving);
+  panelWanted = near && !loco.moving;
+  panel.show(panelWanted);
   if (panel.shown > 0 || near) {
     const p = avatar.object.getWorldPosition(new THREE.Vector3()).setY(panelHeight);
     panel.place(glass.onGlass(p), camera.quaternion);
   }
   panel.update(dt);
+  if (pressReq && !pressReq.reaching) {
+    pressReq.waitedS += dt;
+    reachFor(pressReq);
+  }
 }
+
+const gestureOf = (c: PanelControl) => (c.action?.startsWith('gesture:') ? c.action.slice('gesture:'.length) : null);
 
 function usePanel(id: string, source: 'user' | 'avatar'): void {
   const pressed = panel?.press(id, source);
   if (!pressed) return;
   const c = pressed.control;
   hud.status.textContent = `${source === 'user' ? 'You' : 'Kamari'} pressed ${c.label}${c.kind === 'toggle' ? (c.on ? ' (on)' : ' (off)') : ''}`;
-  const action = c.action ?? '';
-  if (action === 'lights') {
+  if (c.action === 'lights') {
     hemi.intensity = c.on ? lightLevels.hemi : lightLevels.hemi * 0.3;
     sun.intensity = c.on ? lightLevels.sun : lightLevels.sun * 0.15;
-  } else if (action.startsWith('gesture:')) {
-    const play = () => playGesture(action.slice('gesture:'.length));
-    if (source === 'avatar') afterTap.push(play);
-    else play();
   }
-  const cmdId = source === 'avatar' && pressCmd?.control === id ? pressCmd.cmdId : undefined;
-  if (cmdId) pressCmd = null;
-  net.send('control_pressed', { control: id, source, ...(c.kind === 'toggle' ? { on: !!c.on } : {}), ...(cmdId ? { cmd_id: cmdId } : {}) });
+  const report = { control: id, source, ...(c.kind === 'toggle' ? { on: !!c.on } : {}) };
+  const req = pressReq;
+  if (source === 'avatar' && req?.reaching && !req.pressed && req.control === id) {
+    req.pressed = { ...report, cmd_id: req.cmdId }; // reported, and its gesture played, once the arm is back
+    return;
+  }
+  const g = gestureOf(c);
+  if (g && source === 'avatar') afterTap.push(() => playGesture(g));
+  else if (g) playGesture(g);
+  net.send('control_pressed', report);
+}
+
+/** Report a requested press exactly once: done, or why not. */
+function settle(req: PressRequest, failure?: string): void {
+  if (req.done) return;
+  req.done = true;
+  if (pressReq === req) pressReq = null;
+  if (failure === undefined && req.pressed) {
+    net.send('control_pressed', req.pressed);
+    return;
+  }
+  const reason = failure ?? 'missed';
+  net.send('command_cancelled', { cmd_id: req.cmdId, reason });
+  hud.status.textContent = `Kamari didn't press ${req.control}: ${reason.replace('_', ' ')}`;
 }
 
 /** The server asks the avatar to press a control: it reaches out and taps it through the glass. */
 function pressControl(data: ServerMsg<'press_control'>['data']): void {
-  const fail = (reason: string) => {
-    net.send('command_cancelled', { cmd_id: data.cmd_id, reason });
-    hud.status.textContent = `Kamari didn't press ${data.control}: ${reason.replace('_', ' ')}`;
-  };
-  if (!panel?.controls.some((c) => c.id === data.control)) return fail(`unknown control ${data.control}`);
-  const point = panel.touchable && panel.pointOf(data.control);
-  if (!point) return fail('panel_hidden');
-  const req = { cmdId: data.cmd_id, control: data.control };
-  pressCmd = req;
-  const ok = avatarTap(glass.screenOf(point), (completed, reason) => {
-    if (pressCmd !== req) return; // pressed: reported with control_pressed
-    pressCmd = null;
-    fail(completed ? 'missed' : (reason ?? 'interrupted'));
-  });
-  if (!ok) {
-    pressCmd = null;
-    fail('cannot press while walking');
+  if (pressReq) settle(pressReq, 'replaced');
+  const req: PressRequest = { cmdId: data.cmd_id, control: data.control, reaching: false, pressed: null, waitedS: 0, done: false };
+  if (!panel?.controls.some((c) => c.id === data.control)) return settle(req, `unknown control ${data.control}`);
+  pressReq = req;
+  reachFor(req);
+}
+
+/** Start the reach once the panel takes touches; keep waiting while it fades in, give up if it is going away. */
+function reachFor(req: PressRequest): void {
+  if (!panel?.touchable) {
+    // Checked from the next frame on: the avatar may have arrived since the panel last looked.
+    if (req.waitedS > 0 && (!panelWanted || req.waitedS > PRESS_WAIT_S)) settle(req, 'panel_hidden');
+    return;
   }
+  req.reaching = true;
+  const ok = avatarTap(() => panel?.pointOf(req.control) ?? null, (completed, reason) => {
+    if (!req.pressed) return settle(req, completed ? 'missed' : (reason ?? 'interrupted'));
+    const c = panel?.controls.find((x) => x.id === req.control);
+    const g = c && gestureOf(c);
+    if (!g || !playGesture(g, () => settle(req))) settle(req);
+  });
+  if (!ok) settle(req, 'cannot press while walking');
 }
 
 // ---------------------------------------------------------------- speech and conversation

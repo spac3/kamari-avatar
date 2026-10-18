@@ -22,6 +22,7 @@ import asyncio
 import collections
 import json
 import logging
+import math
 import re
 import secrets
 import struct
@@ -578,7 +579,11 @@ class Director:
                  f"The room has these places: {places}.",
                  f"Gestures you can make: {', '.join(room.gestures())}.", where]
         if p := panel(room):
-            showing = "showing now" if here == p["location"] else "hidden now"
+            # Where the browser last said it stood, not the last place it arrived at: it starts at the
+            # centre without arriving there, and keeps that place name while walking away.
+            spot, pos = room.location(p["location"]), self.session.avatar.position
+            near = spot is not None and math.hypot(pos.x - spot.x, pos.z - spot.z) <= p.get("radius_m", 0.6)
+            showing = "showing now" if near else "hidden now"
             lines.append(f"A glass panel with buttons shows while you stand at the {p['location']} ({showing}).")
         if self._notes:
             lines.append("Since the last message: " + " ".join(self._notes))

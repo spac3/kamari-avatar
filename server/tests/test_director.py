@@ -11,6 +11,7 @@ from kamari_avatar.config import BackendConfig, build
 from kamari_avatar.director import Director
 from kamari_avatar.impl.fakes import FakeToolProvider
 from kamari_avatar.interfaces import AudioSegment, Done, TextDelta, ToolCall
+from kamari_avatar.protocol import Vec2
 from kamari_avatar.session import Session
 
 TEST_CONFIG = Path(__file__).with_name("backend.test.yaml")
@@ -326,7 +327,6 @@ async def test_presses_a_panel_control_and_hears_the_result_next_turn():
     llm = ScriptedLLM([TextDelta("Lights off."), ToolCall("c1", "press_control", {"control": "Lights"}), Done("tool_calls")],
                       [TextDelta("Done."), Done()])
     d, browser = make(llm)
-    d.session.avatar = d.session.avatar.model_copy(update={"location": "centre"})
     result = await run(d, "turn the lights off")
     assert result["actions"] == ["press_control(lights)"]
     await asyncio.sleep(0.05)
@@ -341,6 +341,7 @@ async def test_a_press_with_the_panel_hidden_is_reported():
     llm = ScriptedLLM([ToolCall("c1", "press_control", {"control": "wave"}), Done("tool_calls")], [TextDelta("Hm."), Done()])
     d, browser = make(llm)
     browser.panel_shown = False
+    d.session.avatar = d.session.avatar.model_copy(update={"location": "centre", "position": Vec2(x=0.0, z=-2.3)})
     await run(d, "press wave")
     await asyncio.sleep(0.05)
     await run(d, "well?")
