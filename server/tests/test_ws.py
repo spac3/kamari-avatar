@@ -61,20 +61,20 @@ def ready(ws):
     return ws.receive_json()["data"]["session_id"]
 
 
-def test_text_box_walks_and_speaks():
+def test_slash_commands_walk_and_speak():
     with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
         ready(ws)
-        ws.send_json(msg("user_text", {"text": "go to the sofa"}))
+        ws.send_json(msg("user_text", {"text": "/go to the sofa"}))
         assert ws.receive_json()["type"] == "transcript"
         walk = ws.receive_json()
         assert walk["type"] == "walk_to" and walk["data"]["target"] == {"location": "sofa"}
 
-        ws.send_json(msg("user_text", {"text": "walk to the moon"}))
+        ws.send_json(msg("user_text", {"text": "/walk to the moon"}))
         ws.receive_json()
         err = ws.receive_json()
         assert err["type"] == "error" and err["data"]["code"] == "unknown_location"
 
-        ws.send_json(msg("user_text", {"text": "say Hi Bob"}))
+        ws.send_json(msg("user_text", {"text": "/say Hi Bob"}))
         ws.receive_json()
         start = ws.receive_json()
         assert start["type"] == "speech_start" and start["data"]["text"] == "Hi Bob"
@@ -152,9 +152,68 @@ def test_disconnect_ends_the_utterance_in_progress():
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
             sid = ready(ws)
-            ws.send_json(msg("user_text", {"text": "say Hello there"}))
+            ws.send_json(msg("user_text", {"text": "/say Hello there"}))
             ws.receive_json()
             uid = ws.receive_json()["data"]["utterance_id"]
         director = app.state.hub.directors[sid]
         result = client.portal.call(director.wait, uid, 5)
         assert result["type"] == "speech_cancel" and result["reason"] == "disconnected"
+
+
+def receive_until(ws, wanted, limit=50):
+    """Messages (JSON, or ("audio", bytes)) until every type in `wanted` has been seen."""
+    got, wanted = [], set(wanted)
+    for _ in range(limit):
+        frame = ws.receive()
+        m = ("audio", frame["bytes"]) if frame.get("bytes") is not None else __import__("json").loads(frame["text"])
+        got.append(m)
+        wanted.discard(m[0] if isinstance(m, tuple) else m["type"])
+        if not wanted:
+            return got
+    raise AssertionError(f"never saw {wanted}")
+
+
+def types(got):
+    return [m[0] if isinstance(m, tuple) else m["type"] for m in got]
+
+
+def test_typed_text_goes_to_the_llm():
+    # backend.test.yaml's fake LLM answers "Sure, heading to the sofa now." and calls walk_to(sofa)
+    with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
+        ready(ws)
+        ws.send_json(msg("user_text", {"text": "go to the sofa"}))
+        got = receive_until(ws, ["transcript", "speech_start", "speech_chunk", "audio", "speech_end", "walk_to"])
+        start = next(m for m in got if isinstance(m, dict) and m["type"] == "speech_start")
+        assert start["data"]["text"] == "Sure, heading to the sofa now."
+        walk = next(m for m in got if isinstance(m, dict) and m["type"] == "walk_to")
+        assert walk["data"]["target"] == {"location": "sofa"}
+        uid = start["data"]["utterance_id"]
+        ws.send_json(msg("speech_started", {"utterance_id": uid}))
+        timing = receive_until(ws, ["turn_timing"])[-1]["data"]
+        assert {"llm_first_token_ms", "tts_first_audio_ms", "first_audio_ms"} <= timing.keys()
+        assert client.get("/latency").json()["turns"][-1]["turn_id"] == timing["turn_id"]
+
+
+def test_push_to_talk_over_the_socket():
+    with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
+        ready(ws)
+        ws.send_json(msg("ptt", {"state": "down", "stream_id": 3}))
+        assert receive_until(ws, ["listening"])[-1]["data"] == {"mode": "ptt"}
+        for seq in range(5):  # 5 x 20 ms of 16 kHz PCM16
+            ws.send_bytes(struct.pack(">BII", 1, 3, seq) + b"\x00\x01" * 320)
+        ws.send_json(msg("ptt", {"state": "up", "stream_id": 3}))
+        got = receive_until(ws, ["transcript", "walk_to", "speech_end"])
+        assert got[0]["data"] == {"mode": "off"}
+        assert next(m for m in got if isinstance(m, dict) and m["type"] == "transcript")["data"]["text"] == "go to the sofa"
+
+
+def test_hiding_the_tab_stops_the_reply():
+    app = create_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        sid = ready(ws)
+        ws.send_json(msg("user_text", {"text": "/say A long line that is still playing when the phone locks."}))
+        uid = receive_until(ws, ["speech_start"])[-1]["data"]["utterance_id"]
+        ws.send_json(msg("visibility", {"state": "hidden"}))
+        got = receive_until(ws, ["speech_cancel"])
+        assert got[-1]["data"] == {"utterance_id": uid, "reason": "hidden"}
+        assert app.state.hub.directors[sid].session.visible is False

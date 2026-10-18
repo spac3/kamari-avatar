@@ -4,11 +4,27 @@ room_registry:
   impl: json
   options: { path: rooms/studio/manifest.json }
 stt:
-  impl: fake
-  options: { transcript: "go to the sofa" }
+  # faster-whisper on CPU (pip install -e "server[stt]"); the model downloads on first start.
+  # Without it, a fake that always "hears" `hello`; /health shows which one is running.
+  impl: faster_whisper
+  options: { model: base.en, device: cpu, compute_type: int8, language: en }
+  fallback: fake
+  fallback_options: { transcript: "hello" }
 llm:
-  impl: fake
-  options: { reply: "Sure, heading to the sofa now.", tool_call: { name: walk_to, arguments: { location: sofa } } }
+  # Any OpenAI-compatible endpoint. The default is an open-weight model on a hosted service: the
+  # one proprietary, paid part of the stack. Put the key in the env var named by api_key_env.
+  # Model ids change; check the provider's list. To run locally instead, see config/llm-ollama.yaml.
+  impl: openai_compatible
+  options:
+    base_url: https://api.groq.com/openai/v1
+    model: qwen/qwen3-32b
+    api_key_env: LLM_API_KEY
+    extra_body: { reasoning_effort: none }   # Qwen3 thinks before answering otherwise: slow for speech
+    temperature: 0.6
+    max_tokens: 400
+  # Until the key is set, the avatar says so instead of answering.
+  fallback: fake
+  fallback_options: { reply: "My language model isn't set up yet. Set the LLM API key and restart the backend." }
 tts:
   # Piper with phoneme alignments (pip install -e "server[piper]", then download the voice; see README).
   # Falls back to the fake tone voice until both are there; /health shows which one is running.
@@ -38,6 +54,10 @@ tool_providers:
       timeout_s: 60
 session:
   resume_ttl_s: 600
+director:
+  max_tool_rounds: 3     # extra LLM calls to answer from Kamari tool results
+  history_messages: 40
+  # persona: "..."       # replaces the default system prompt (see config.py DEFAULT_PERSONA)
 debug:
   # /debug/run and /debug/command drive the avatar without a conversation, with no auth: anyone
   # who can reach the backend could make it walk and talk. Off by default; for local development

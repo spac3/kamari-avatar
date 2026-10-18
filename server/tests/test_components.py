@@ -163,3 +163,16 @@ async def test_director_text_commands(comps, text, kind, where):
     elif kind == "walk_to":
         assert ref is None and sent[-1][0] == "error" and "'tomorrow'" in sent[-1][1]["message"]
     await d.cancel_speech("test")
+
+
+def test_config_extends_replaces_whole_sections(tmp_path):
+    (tmp_path / "local.yaml").write_text(f"extends: {TEST_CONFIG}\nllm:\n  impl: fake\n  options: {{ reply: hi }}\n")
+    cfg = BackendConfig.load(tmp_path / "local.yaml")
+    assert cfg.llm.options == {"reply": "hi"}  # not merged with the base llm options
+    assert cfg.tts.impl == "fake" and cfg.debug.endpoints  # everything else from the base
+
+
+def test_shipped_ollama_config_switches_only_the_llm():
+    base, ollama = BackendConfig.load(), BackendConfig.load("config/llm-ollama.yaml")
+    assert ollama.llm.options["base_url"].startswith("http://localhost:11434")
+    assert ollama.model_dump(exclude={"llm"}) == base.model_dump(exclude={"llm"})

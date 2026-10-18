@@ -1,0 +1,12 @@
+# Same backend, different LLM: a small open model on this machine through Ollama (MIT).
+#   ollama pull qwen3:1.7b
+#   KAMARI_AVATAR_CONFIG=config/llm-ollama.yaml uvicorn --factory kamari_avatar.app:create_app --port 8000
+# Only the sections listed here replace those in the file named by `extends`.
+extends: backend.yaml
+llm:
+  impl: openai_compatible
+  options:
+    base_url: http://localhost:11434/v1
+    model: qwen3:1.7b
+    api_key_env: null    # local: no key
+    max_tokens: 400

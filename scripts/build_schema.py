@@ -28,7 +28,7 @@ server = {
   "speech_start": obj({"utterance_id": S(), "text": S(), "voice": S()}, required=["utterance_id","text"]),
   "speech_chunk": obj({"utterance_id": S(), "stream_id": I(), "seq": I(), "sample_rate": I(), "duration_ms": I(),
                        "visemes": {"type":"array","items": R("VisemeKey")}, "words": {"type":"array","items": R("WordKey")},
-                       "last": B}, required=["utterance_id","stream_id","seq","sample_rate","duration_ms","last"]),
+                       "text": S(description="The sentence this chunk speaks"), "last": B}, required=["utterance_id","stream_id","seq","sample_rate","duration_ms","last"]),
   "speech_end": obj({"utterance_id": S(), "total_chunks": I()}),
   "speech_cancel": obj({"utterance_id": S(), "reason": S()}),
   "gesture": obj({"cmd_id": S(), "name": S(), "layer": S(enum=["upper","full"], default="upper"),
@@ -41,6 +41,9 @@ server = {
   "state_sync": obj({"session_id": S(), "last_seq": I(), "avatar": R("AvatarSnapshot"),
                      "pending_cmds": {"type":"array","items": S()}, "speech": S(enum=["silent","talking","listening","thinking"])}),
   "pong": obj({"t": I()}),
+  "turn_timing": obj({"turn_id": S(), "stt_ms": I(), "llm_first_token_ms": I(), "first_sentence_ms": I(),
+                      "tts_first_audio_ms": I(), "first_audio_ms": I(), "total_ms": I()}, required=["turn_id"],
+                     description="Latency of one conversational turn, each stage in ms from the end of the user's speech"),
 }
 client = {
   "hello": obj({"client": S(), "version": S(), "room_id": S(), "device": S(enum=["desktop","mobile"]),
@@ -59,7 +62,8 @@ client = {
   "gesture_finished": obj({"cmd_id": S(), "name": S()}),
   "user_speech_start": obj({"segment_id": S(), "while": S(enum=["idle","talking","walking"])}, required=["segment_id"]),
   "user_speech_end": obj({"segment_id": S(), "duration_ms": I()}),
-  "ptt": obj({"state": S(enum=["down","up"])}),
+  "ptt": obj({"state": S(enum=["down","up"]), "stream_id": I(description="stream_id of the mic audio frames for this press")},
+              required=["state"]),
   "user_text": obj({"text": S()}),
   "state": obj({"loco": S(enum=["idle","turning","walking","arriving"]), "speech": S(enum=["silent","talking","listening","thinking"]), "position": R("Vec2"), "heading_deg": N()}),
 }

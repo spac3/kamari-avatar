@@ -19,7 +19,8 @@ export type ServerMessage =
   | TranscriptMessage
   | ErrorMessage
   | StateSyncMessage
-  | PongMessage;
+  | PongMessage
+  | TurnTimingMessage;
 /**
  * Oculus 15-viseme set
  */
@@ -165,6 +166,10 @@ export interface SpeechChunkData {
   duration_ms: number;
   visemes?: VisemeKey[];
   words?: WordKey[];
+  /**
+   * The sentence this chunk speaks
+   */
+  text?: string;
   last: boolean;
 }
 export interface VisemeKey {
@@ -368,6 +373,32 @@ export interface PongMessage {
 }
 export interface PongData {
   t: number;
+}
+export interface TurnTimingMessage {
+  v: 1;
+  type: "turn_timing";
+  id: string;
+  /**
+   * Unix ms
+   */
+  ts: number;
+  data: TurnTimingData;
+  /**
+   * Monotonic per session, used by resume
+   */
+  seq: number;
+}
+/**
+ * Latency of one conversational turn, each stage in ms from the end of the user's speech
+ */
+export interface TurnTimingData {
+  turn_id: string;
+  stt_ms?: number;
+  llm_first_token_ms?: number;
+  first_sentence_ms?: number;
+  tts_first_audio_ms?: number;
+  first_audio_ms?: number;
+  total_ms?: number;
 }
 export interface HelloMessage {
   v: 1;
@@ -587,6 +618,10 @@ export interface PttMessage {
 }
 export interface PttData {
   state: "down" | "up";
+  /**
+   * stream_id of the mic audio frames for this press
+   */
+  stream_id?: number;
 }
 export interface UserTextMessage {
   v: 1;

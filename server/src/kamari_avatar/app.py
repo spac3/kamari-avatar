@@ -1,8 +1,8 @@
 """FastAPI app: WebSocket endpoint speaking the protocol in schema/protocol.schema.json.
 
-Handshake, heartbeats, resume after a drop and state tracking, plus the Director that sends
-walk and speech commands. In M1 commands come from the debug text box (`user_text`) and the
-/debug endpoints; the LLM takes over in M2.
+Handshake, heartbeats, resume after a drop and state tracking. Push-to-talk audio and typed
+text go to the Director, which runs the conversation (STT, LLM, TTS) and sends walk, gesture
+and speech commands. Text starting with "/" is a debug command ("/go to sofa", "/say hi").
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from . import __version__
 from .config import DEFAULT_CONFIG, BackendConfig, Components, build
-from .director import Director
+from .director import AUDIO_MIC, Director, parse_frame
 from .protocol import (
     AvatarSnapshot,
     ClientMessage,
@@ -54,7 +54,7 @@ class Hub:
         for sid in [sid for sid in self.directors if sid not in self.sessions]:  # expired sessions
             del self.directors[sid]
         if s.id not in self.directors:
-            self.directors[s.id] = Director(s, self.comps, SessionOutbox(self, s.id))
+            self.directors[s.id] = Director(s, self.comps, SessionOutbox(self, s.id), self.comps.director)
         return self.directors[s.id]
 
 
@@ -137,6 +137,8 @@ class Connection:
                 await self.send("pong", {"t": d.t})
             case "visibility":
                 s.visible = d.state == "visible"
+                if not s.visible:
+                    await director.pause()
             case "state":
                 s.avatar = AvatarSnapshot(location=s.avatar.location, position=d.position, heading_deg=d.heading_deg)
                 s.speech = d.speech
@@ -148,13 +150,22 @@ class Connection:
                 director.resolve(d.cmd_id, {"type": msg.type} | d.model_dump(mode="json", exclude_none=True))
             case "speech_started":
                 s.speech = "talking"
+                director.on_speech_started(d.utterance_id)
             case "speech_finished":
                 s.speech = "silent"
                 director.resolve(d.utterance_id, {"type": msg.type} | d.model_dump(mode="json", exclude_none=True))
+                await director.on_speech_finished(d.utterance_id, d.interrupted, d.played_ms)
+            case "ptt":
+                if d.state == "down":
+                    await director.ptt_down(d.stream_id)
+                else:
+                    await director.ptt_up()
             case "user_text":
-                # M1: the debug text box drives the Director directly. In M2 this goes to the LLM.
                 await self.send("transcript", {"text": d.text, "final": True})
-                await director.command(d.text)
+                if d.text.startswith("/"):
+                    await director.command(d.text[1:])
+                else:
+                    await director.converse(d.text)
             case _:
                 log.debug("unhandled %s", msg.type)
 
@@ -165,7 +176,8 @@ class DebugCommand(BaseModel):
 
 
 class DebugRun(BaseModel):
-    """Steps run in order, each waiting for the browser's event: {"walk_to": "sofa"} or {"say": "Hello"}."""
+    """Steps run in order, each waiting for the browser's event: {"walk_to": "sofa"}, {"say": "Hello"},
+    or {"ask": "go to the window and wave"} for a whole conversational turn."""
 
     steps: list[dict[str, str]]
     session_id: str | None = None
@@ -201,6 +213,12 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
     async def manifest() -> dict[str, Any]:
         return comps.room.manifest()
 
+    @app.get("/latency")
+    async def latency() -> dict[str, Any]:
+        """Per-stage timings of recent turns (ms from the end of the user's speech), newest last."""
+        turns = sorted((t for d in hub.directors.values() for t in d.timings), key=lambda t: t.get("total_ms", 0))
+        return {"turns": turns[-50:]}
+
     if comps.debug.endpoints or os.environ.get("KAMARI_AVATAR_DEBUG") == "1":
         def director_for(session_id: str | None) -> Director:
             live = [s for s in sessions.connected() if s.id in hub.live]
@@ -228,8 +246,14 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
                     ref = await director.walk_to(location=step["walk_to"])
                 elif "say" in step:
                     ref = await director.say(step["say"])
+                elif "ask" in step:
+                    event = await director.wait_turn(await director.converse(step["ask"]), run.timeout_s)
+                    events.append({"step": step, "event": event})
+                    if event["type"] != "turn_done":
+                        break
+                    continue
                 else:
-                    raise HTTPException(422, f"unknown step {step}; use walk_to or say")
+                    raise HTTPException(422, f"unknown step {step}; use walk_to, say or ask")
                 if ref:
                     event = await director.wait(ref, run.timeout_s)
                 else:
@@ -237,7 +261,7 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
                 events.append({"step": step, "event": event})
                 if event["type"] not in ("arrived", "speech_finished"):
                     break
-            ok = len(events) == len(run.steps) and all(e["event"]["type"] in ("arrived", "speech_finished")
+            ok = len(events) == len(run.steps) and all(e["event"]["type"] in ("arrived", "speech_finished", "turn_done")
                                                        for e in events)
             return {"ok": ok, "session_id": director.session.id, "events": events}
 
@@ -250,8 +274,11 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
                 frame = await ws.receive()
                 if frame["type"] == "websocket.disconnect":
                     break
-                if frame.get("bytes") is not None:
-                    continue  # binary mic audio: handled from M2
+                if (data := frame.get("bytes")) is not None:
+                    parsed = parse_frame(data)
+                    if conn.session and parsed and parsed[0] == AUDIO_MIC:
+                        hub.director(conn.session).mic_audio(parsed[1], parsed[3])
+                    continue
                 try:
                     msg = _client_msg.validate_json(frame.get("text") or "").root
                 except ValidationError as e:
@@ -276,6 +303,6 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
                 # Audio sent while disconnected is lost, so the browser can never finish this
                 # utterance: end it here rather than leave anyone waiting for speech_finished.
                 if director := hub.directors.get(conn.session.id):
-                    await director.cancel_speech("disconnected")
+                    await director.interrupt("disconnected")
 
     return app
