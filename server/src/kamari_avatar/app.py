@@ -1,13 +1,14 @@
 """FastAPI app: WebSocket endpoint speaking the protocol in schema/protocol.schema.json.
 
-Handshake, heartbeats, resume after a drop and state tracking. Push-to-talk audio and typed
-text go to the Director, which runs the conversation (STT, LLM, TTS) and sends walk, gesture
+Handshake, heartbeats, resume after a drop and state tracking. Push-to-talk audio, open-mic speech
+segments and typed text go to the Director, which runs the conversation (STT, LLM, TTS) and sends walk, gesture
 and speech commands. Text starting with "/" is a debug command ("/go to sofa", "/say hi").
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import os
 import secrets
@@ -167,6 +168,10 @@ class Connection:
                 s.speech = "silent"
                 director.resolve(d.utterance_id, {"type": msg.type} | d.model_dump(mode="json", exclude_none=True))
                 await director.on_speech_finished(d.utterance_id, d.interrupted, d.played_ms)
+            case "user_speech_start":
+                await director.user_speech_start(d.stream_id, d.while_)
+            case "user_speech_end":
+                await director.user_speech_end()
             case "ptt":
                 if d.state == "down":
                     await director.ptt_down(d.stream_id)
@@ -227,9 +232,11 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
 
     @app.get("/latency")
     async def latency() -> dict[str, Any]:
-        """Per-stage timings of recent turns (ms from the end of the user's speech), newest last."""
+        """Per-stage timings of recent turns (ms from the end of the user's speech), newest last, and how
+        often the open mic heard something: segments, barge-ins, and segments dropped as noise or echo."""
         turns = sorted((t for d in hub.directors.values() for t in d.timings), key=lambda t: t["at"])
-        return {"turns": turns[-50:]}
+        open_mic = sum((d.stats for d in hub.directors.values()), collections.Counter())
+        return {"turns": turns[-50:], "open_mic": dict(open_mic)}
 
     if comps.debug.endpoints or os.environ.get("KAMARI_AVATAR_DEBUG") == "1":
         def director_for(session_id: str | None) -> Director:

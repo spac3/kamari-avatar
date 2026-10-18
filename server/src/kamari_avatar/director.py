@@ -1,10 +1,16 @@
 """Turns what the user says into speech and movement for one session.
 
-One conversational turn: push-to-talk audio -> STT -> text -> LLM (streamed). Text is cut into
+One conversational turn: the user's audio (push-to-talk, or a segment the browser's VAD cut from the
+open mic) -> STT -> text -> LLM (streamed). Text is cut into
 sentences and each is synthesized as soon as it is complete, so the avatar starts talking while
 the LLM is still writing. Tool calls are checked against the room; the avatar's own tools become
 commands run in order (walk to the window, then wave on arrival) without blocking speech, and
 Kamari's tools are called with their results fed back to the LLM for another round.
+
+Barge-in: when the user starts talking (a press, or the open mic hearing them) the turn in progress
+stops, with its speech and queued movement, and history keeps only the sentences the user heard.
+Open-mic segments get two checks the push-to-talk ones do not need: enough speech in them (the server
+VAD) and a transcript that is not just the avatar's own voice coming back through the microphone.
 
 The debug text box and /debug endpoints still drive the avatar directly through `command`,
 `walk_to` and `say`.
@@ -24,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .config import Components, DirectorSettings
+from .echo import is_echo
 from .interfaces import AudioSegment, ChatMessage, Done, TextDelta, ToolCall, ToolResult, ToolSpec
 from .protocol import SpeechChunkData, Vec2, VisemeKey, WalkToData
 from .session import Session
@@ -73,6 +80,7 @@ class TurnTiming:
 
 
 HEARD_MS = 20
+ECHO_WINDOW_S = 10  # how long after an utterance's audio could have ended an echo of it is still expected
 
 
 @dataclass
@@ -83,6 +91,7 @@ class _Utterance:
     spoken: list[tuple[int, str]] = field(default_factory=list)  # (ms into the utterance, sentence)
     ms: int = 0
     turn: _Turn | None = None
+    created: float = field(default_factory=time.monotonic)
 
     def heard(self, played_ms: int) -> int:
         """How many sentences had started playing.
@@ -129,6 +138,9 @@ class Director:
     _notes: list[str] = field(default_factory=list)  # things that happened, told to the LLM next turn
     _mic: bytearray | None = None
     _mic_stream: int | None = None
+    _mic_mode: str = "ptt"
+    # Open-mic counters (segments, barge_ins, dropped_no_speech, dropped_echo): how often it misfires.
+    stats: collections.Counter[str] = field(default_factory=collections.Counter)
     _tool_sources: dict[str, ToolSpec] = field(default_factory=dict)
     _background: set[asyncio.Task[None]] = field(default_factory=set)
 
@@ -242,10 +254,22 @@ class Director:
 
     async def ptt_down(self, stream_id: int | None) -> None:
         """The user pressed push-to-talk: stop talking and start collecting their audio."""
+        await self._listen(stream_id, "ptt")
+
+    async def user_speech_start(self, stream_id: int, while_: str | None = None) -> None:
+        """Open mic: the browser's VAD heard the user start talking. It has already stopped the avatar's
+        audio and walk; stop the turn behind them and collect the segment."""
+        self.stats["segments"] += 1
+        busy = self._turn is not None and self._turn.task is not None and not self._turn.task.done()
+        if busy or while_ in ("talking", "walking"):
+            self.stats["barge_ins"] += 1
+        await self._listen(stream_id, "open_mic")
+
+    async def _listen(self, stream_id: int | None, mode: str) -> None:
         await self.interrupt("user_speaking")
-        self._mic, self._mic_stream = bytearray(), stream_id
+        self._mic, self._mic_stream, self._mic_mode = bytearray(), stream_id, mode
         self.session.speech = "listening"
-        await self.out.send_json("listening", {"mode": "ptt"})
+        await self.out.send_json("listening", {"mode": mode})
 
     def mic_audio(self, stream_id: int, pcm: bytes) -> None:
         if self._mic is None or (self._mic_stream is not None and stream_id != self._mic_stream):
@@ -255,13 +279,26 @@ class Director:
 
     async def ptt_up(self) -> str | None:
         """Released: transcribe what was said and answer it. Returns the turn id."""
-        pcm, self._mic = self._mic, None
+        return await self._heard()
+
+    async def user_speech_end(self) -> str | None:
+        """Open mic: the user stopped talking. Returns the turn id, or None if the segment was dropped."""
+        return await self._heard()
+
+    async def _heard(self) -> str | None:
+        pcm, mode, self._mic = self._mic, self._mic_mode, None
         await self.out.send_json("listening", {"mode": "off"})
         if pcm is None:
             return None
+        segment = AudioSegment(bytes(pcm))
+        if mode == "open_mic" and (ms := self.comps.vad.speech_ms(segment)) < self.settings.min_speech_ms:
+            log.info("open mic: dropped a segment with %d ms of speech", ms)
+            self.stats["dropped_no_speech"] += 1
+            self.session.speech = "silent"
+            return None
         turn = await self._new_turn("superseded")
         self.session.speech = "thinking"
-        turn.task = asyncio.create_task(self._run_turn(turn, audio=AudioSegment(bytes(pcm))))
+        turn.task = asyncio.create_task(self._run_turn(turn, audio=segment, open_mic=mode == "open_mic"))
         return turn.id
 
     async def interrupt(self, reason: str) -> None:
@@ -275,6 +312,7 @@ class Director:
         self._actions.clear()
         if self._action_task and not self._action_task.done():
             self._action_task.cancel()
+            await asyncio.wait([self._action_task])  # it notes a walk it cut short for the next turn
         await self.cancel_speech(reason)
         if self.session.speech in ("thinking", "talking"):
             self.session.speech = "silent"
@@ -314,13 +352,19 @@ class Director:
         self._turn = self._last_turn = _Turn(turn_id, TurnTiming(turn_id))
         return self._turn
 
-    async def _run_turn(self, turn: _Turn, *, text: str | None = None, audio: AudioSegment | None = None) -> None:
+    async def _run_turn(self, turn: _Turn, *, text: str | None = None, audio: AudioSegment | None = None,
+                        open_mic: bool = False) -> None:
         sid, store = self.session.id, self.comps.store
         try:
             if audio is not None:
+                said = self._recently_said()  # before anything new is said
                 transcript = await self.comps.stt.transcribe(audio)
                 turn.timing.mark("stt")
                 text = transcript.text.strip()
+                if open_mic and self.settings.echo_filter and is_echo(text, said):
+                    log.info("open mic: dropped %r, the avatar's own words", text)
+                    self.stats["dropped_echo"] += 1
+                    text = ""
                 await self.out.send_json("transcript", {"text": text, "final": True})
             turn.transcript = text = (text or "").strip()
             if not text:
@@ -398,6 +442,12 @@ class Director:
             more = more or external or result.is_error
         return more
 
+    def _recently_said(self) -> list[str]:
+        """Sentences of the last two utterances, if they could still be playing: what an echo would repeat."""
+        now = time.monotonic()
+        return [text for u in list(self._recent.values())[-2:] if now - u.created < u.ms / 1000 + ECHO_WINDOW_S
+                for _, text in u.spoken]
+
     def _say_piece(self, turn: _Turn, piece: str) -> None:
         turn.timing.mark("first_sentence")
         turn.pieces.append((turn.round, piece))
@@ -457,8 +507,12 @@ class Director:
             if name == "walk_to":
                 cmd = await self.walk_to(location=args["location"])
                 if cmd:
-                    ev = await self.wait(cmd, self.settings.walk_timeout_s)
                     label = args["location"]
+                    try:
+                        ev = await self.wait(cmd, self.settings.walk_timeout_s)
+                    except asyncio.CancelledError:
+                        self._notes.append(f"You stopped before reaching the {label} because the user interrupted.")
+                        raise
                     if ev["type"] == "arrived":
                         self._notes.append(f"You arrived at the {label}.")
                     elif ev["type"] == "walk_failed":

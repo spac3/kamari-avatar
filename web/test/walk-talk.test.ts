@@ -103,6 +103,10 @@ class FakeAudio implements AudioPlayer {
     this.stopped++;
     this.head = 0;
   }
+  setVolume(): void {}
+  outputLevel(): number {
+    return 0;
+  }
 }
 
 describe('speech player', () => {

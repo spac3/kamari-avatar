@@ -21,6 +21,9 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
   user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #talk[data-state='talking'] { background: #c2462a; }
 #talk[data-state='opening'], #talk[data-state='sending'] { background: #6b655c; }
+/* Hands-free: a glow that follows how sure the voice detector is that someone is talking. */
+#talk[data-state='listening'] { box-shadow: 0 0 0 calc(var(--voice, 0) * 6px) rgba(47, 125, 109, 0.45); transition: box-shadow 80ms; }
+#talk[data-state='muted'] { background: #6b655c; }
 .captions { pointer-events: none; display: grid; gap: 4px; }
 .captions p { margin: 0; background: var(--panel); border-radius: 10px; padding: 4px 10px; font-size: 13px; }
 .captions p:has(span:empty) { display: none; }

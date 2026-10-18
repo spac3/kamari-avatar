@@ -207,6 +207,21 @@ def test_push_to_talk_over_the_socket():
         assert next(m for m in got if isinstance(m, dict) and m["type"] == "transcript")["data"]["text"] == "go to the sofa"
 
 
+def test_open_mic_segment_over_the_socket():
+    app = create_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+        sid = ready(ws)
+        ws.send_json(msg("user_speech_start", {"segment_id": "seg_1", "stream_id": 4, "while": "idle"}))
+        assert receive_until(ws, ["listening"])[-1]["data"] == {"mode": "open_mic"}
+        for seq in range(25):  # 500 ms of a loud 16 kHz square wave: plenty of speech for the server VAD
+            ws.send_bytes(struct.pack(">BII", 1, 4, seq) + (b"\x00\x30" * 20 + b"\x00\xd0" * 20) * 8)
+        ws.send_json(msg("user_speech_end", {"segment_id": "seg_1", "duration_ms": 500}))
+        got = receive_until(ws, ["transcript"])
+        assert got[-1]["data"]["text"] == "go to the sofa"
+        assert app.state.hub.directors[sid].stats["segments"] == 1
+        assert client.get("/latency").json()["open_mic"] == {"segments": 1}
+
+
 def test_hiding_the_tab_stops_the_reply():
     app = create_app()
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:

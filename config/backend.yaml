@@ -37,6 +37,11 @@ chunker:
   impl: punctuation
 conversation_store:
   impl: memory
+vad:
+  # Open mic only: a second opinion on each segment the browser's VAD sends. Segments with less
+  # speech than director.min_speech_ms are dropped before STT. `fake` counts loud frames.
+  impl: energy
+  options: { min_dbfs: -50, margin_db: 9 }
 # External tools the LLM can use. Kamari is the user's MCP server with plugins.
 # Give the avatar its own Kamari API key (env KAMARI_API_KEY) granted only the capabilities
 # it needs; `allow` is a second filter on top. Payments, infra, exec, vault, files, backups,
@@ -58,6 +63,8 @@ session:
 director:
   max_tool_rounds: 3     # extra LLM calls to answer from Kamari tool results
   history_messages: 40
+  min_speech_ms: 200     # open mic: less speech than this in a segment is noise, not a turn
+  echo_filter: true      # open mic: ignore transcripts that repeat what Kamari was just saying
   # persona: "..."       # replaces the default system prompt (see config.py DEFAULT_PERSONA)
 debug:
   # /debug/run and /debug/command drive the avatar without a conversation, with no auth: anyone

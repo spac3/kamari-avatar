@@ -1,6 +1,6 @@
 /**
  * Which implementation backs each browser interface. Swap one by changing `impl`,
- * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake&touchfx=none`.
+ * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake&touchfx=none&vad=energy&micmode=ptt`.
  * `?model=jimmy` loads another avatar file from public/avatars instead of the room's.
  */
 import * as THREE from 'three';
@@ -17,6 +17,7 @@ import type {
   LipSyncDriver,
   MicCapture,
   NavigationProvider,
+  VoiceActivityDetector,
   ProtocolClient,
   RoomProvider,
   TapPlayer,
@@ -29,6 +30,9 @@ import { register } from './registry';
 import { ProceduralRoom } from './room/ProceduralRoom';
 import { TimelineLipSync } from './speech/TimelineLipSync';
 import { RippleEffect, type RippleOptions } from './touch/RippleEffect';
+import type { OpenMicOptions } from './mic/OpenMic';
+import { EnergyVad, type EnergyVadOptions } from './vad/EnergyVad';
+import { SileroVad, type SileroVadOptions } from './vad/SileroVad';
 
 export interface Spec { impl: string; options?: Record<string, unknown> }
 
@@ -44,6 +48,14 @@ export interface ClientConfig {
   gestures: Spec;
   tap: Spec;
   touchFx: Spec;
+  /** Voice activity detector for the open mic; `energy` stands in if it cannot load. */
+  vad: Spec;
+  /**
+   * How the user talks: `open` is hands-free (open mic, talk over Kamari to interrupt it), `ptt` is
+   * hold to talk, `auto` picks open on desktops and ptt on phones (held close, noisy places, speaker by the mic).
+   */
+  micMode: 'auto' | 'open' | 'ptt';
+  openMic: OpenMicOptions;
   /** Avatar file name in public/avatars (without .vrm) to use instead of the room's; null keeps the room's. */
   model: string | null;
   quality: 'auto' | 'desktop' | 'mobile' | 'low';
@@ -62,6 +74,9 @@ export const defaultConfig: ClientConfig = {
   gestures: { impl: 'procedural' },
   tap: { impl: 'ik' },
   touchFx: { impl: 'ripples' },
+  vad: { impl: 'silero', options: { model: 'vad/silero_vad_v6.onnx' } },
+  micMode: 'auto',
+  openMic: {},
   model: null,
   quality: 'auto',
   debug: false,
@@ -83,6 +98,8 @@ export function configFromQuery(search: string, base: ClientConfig = defaultConf
     gestures: pick('gestures', base.gestures),
     tap: pick('tap', base.tap),
     touchFx: pick('touchfx', base.touchFx),
+    vad: pick('vad', base.vad),
+    micMode: (q.get('micmode') as ClientConfig['micMode']) ?? base.micMode,
     model: q.get('model') ?? base.model,
     quality: (q.get('quality') as ClientConfig['quality']) ?? base.quality,
     debug: q.has('debug') || base.debug,
@@ -109,4 +126,6 @@ export function registerBuiltins(): void {
   register<TapPlayer>('tap', 'ik', (o) => new IkScreenTap(o.avatar as AvatarAdapter));
   register<TouchEffect>('touchfx', 'ripples', (o) => new RippleEffect(o as RippleOptions));
   register<TouchEffect>('touchfx', 'none', () => ({ object: new THREE.Group(), spawn() {}, update() {} }));
+  register<VoiceActivityDetector>('vad', 'silero', (o) => new SileroVad(o as unknown as SileroVadOptions));
+  register<VoiceActivityDetector>('vad', 'energy', (o) => new EnergyVad(o as EnergyVadOptions));
 }

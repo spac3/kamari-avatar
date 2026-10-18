@@ -82,6 +82,23 @@ export interface AudioPlayer {
   unlock(): Promise<void>;
   enqueue(pcm: Int16Array, sampleRate: number): number; // returns scheduled start time
   stop(): void;
+  /** Output volume 0..1, ramped over `rampS` (open mic ducks the avatar while it checks for a barge-in). */
+  setVolume(volume: number, rampS?: number): void;
+  /** RMS level (0..1) of what is playing right now: the reference the echo gate compares the mic with. */
+  outputLevel(): number;
+}
+
+/**
+ * Voice activity detection on 16 kHz PCM16 mic frames (any length; implementations buffer to the
+ * window they need). Stateful: feed frames in order. Backed by Silero (ONNX in WASM) or an energy detector.
+ */
+export interface VoiceActivityDetector {
+  readonly name: string;
+  /** Load the model; rejects if it cannot run here (the caller falls back to another detector). */
+  load(): Promise<void>;
+  /** Probability 0..1 that the latest audio is speech. */
+  process(frame: Int16Array): Promise<number>;
+  reset(): void;
 }
 
 /** Microphone as 16 kHz PCM16 mono frames. Opened once (needs a user gesture) and kept open. */

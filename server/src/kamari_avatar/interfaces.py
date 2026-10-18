@@ -103,10 +103,10 @@ class Location:
 
 @runtime_checkable
 class VAD(Protocol):
-    """Server-side voice activity confirmation. Returns "start"/"end" on transitions."""
+    """Server-side second opinion on an open-mic segment the browser's VAD sent: how much of it is
+    speech. Segments with too little are dropped before STT (a cough, a door, the avatar's echo)."""
 
-    def feed(self, pcm: bytes) -> Literal["start", "end"] | None: ...
-    def reset(self) -> None: ...
+    def speech_ms(self, segment: AudioSegment) -> int: ...
 
 
 @runtime_checkable

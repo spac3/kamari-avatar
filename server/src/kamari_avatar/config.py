@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import impl  # noqa: F401  (registers built-in implementations)
 from .interfaces import (
+    VAD,
     ConversationStore,
     LLMProvider,
     RoomRegistry,
@@ -62,6 +63,10 @@ class DirectorSettings(BaseModel):
     walk_timeout_s: float = 60
     gesture_timeout_s: float = 10
     tool_timeout_s: float = 60
+    # Open mic: segments the server VAD finds less speech in than this are dropped before STT.
+    min_speech_ms: int = 200
+    # Open mic: drop a transcript that only repeats what the avatar was saying (its echo).
+    echo_filter: bool = True
 
 
 class DebugSettings(BaseModel):
@@ -77,6 +82,7 @@ class BackendConfig(BaseModel):
     viseme_mapper: ComponentSpec
     chunker: ComponentSpec
     conversation_store: ComponentSpec
+    vad: ComponentSpec = Field(default_factory=lambda: ComponentSpec(impl="energy"))
     tool_providers: list[ComponentSpec] = Field(default_factory=list)
     session: SessionSettings = Field(default_factory=SessionSettings)
     director: DirectorSettings = Field(default_factory=DirectorSettings)
@@ -108,6 +114,7 @@ class Components:
     visemes: VisemeMapper
     chunker_spec: ComponentSpec  # chunkers are stateful, so build one per utterance
     store: ConversationStore
+    vad: VAD
     tool_providers: list[ToolProvider] = field(default_factory=list)
     settings: SessionSettings = field(default_factory=SessionSettings)
     director: DirectorSettings = field(default_factory=DirectorSettings)
@@ -146,6 +153,7 @@ def build(cfg: BackendConfig, base_dir: Path = REPO_ROOT) -> Components:
         visemes=make("viseme_mapper", cfg.viseme_mapper),
         chunker_spec=cfg.chunker,
         store=make("conversation_store", cfg.conversation_store),
+        vad=make("vad", cfg.vad),
         tool_providers=providers,
         settings=cfg.session,
         director=cfg.director,
