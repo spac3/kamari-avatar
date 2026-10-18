@@ -15,6 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
@@ -37,6 +38,16 @@ TTS_RATE_DEFAULT = 22050
 MIC_RATE = 16000
 
 
+def _origin_allowed(origin: str | None, host: str | None, allowed: list[str]) -> bool:
+    """Browsers always send Origin: accept our own page (same host, also through the dev proxy) or
+    configured ones. Clients without an Origin (tests, scripts) are not browsers and pass."""
+    if origin is None:
+        return True
+    if origin in allowed or "*" in allowed:
+        return True
+    return host is not None and urlsplit(origin).netloc == host
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -53,6 +64,7 @@ class Hub:
     def director(self, s: Session) -> Director:
         for sid in [sid for sid in self.directors if sid not in self.sessions]:  # expired sessions
             del self.directors[sid]
+            self.comps.store.clear(sid)
         if s.id not in self.directors:
             self.directors[s.id] = Director(s, self.comps, SessionOutbox(self, s.id), self.comps.director)
         return self.directors[s.id]
@@ -267,6 +279,10 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
+        if not _origin_allowed(ws.headers.get("origin"), ws.headers.get("host"), comps.settings.allowed_origins):
+            # Any web page the user opens could otherwise talk to Kamari (and spend the LLM key).
+            await ws.close(code=1008)
+            return
         await ws.accept()
         conn = Connection(ws, hub)
         try:
