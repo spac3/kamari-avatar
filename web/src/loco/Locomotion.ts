@@ -79,6 +79,13 @@ export class Locomotion {
     return replaced;
   }
 
+  /** Turn on the spot to a heading (degrees, 0 faces +Z) unless walking. Reports no arrival. */
+  face(deg: number): void {
+    if (this.cmd) return;
+    this.cmd = { cmdId: '', path: [this.position], location: null, faceDeg: deg, speed: 'walk' };
+    this.setState('arriving');
+  }
+
   /** Stop where we are; returns the command that was running. */
   stop(): WalkCommand | null {
     const cmd = this.cmd;
@@ -149,7 +156,7 @@ export class Locomotion {
       if (Math.abs(err) < 0.02) {
         this.cmd = null;
         this.setState('idle');
-        this.onArrived(cmd);
+        if (cmd.cmdId) this.onArrived(cmd);
       }
     }
   }

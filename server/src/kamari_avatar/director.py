@@ -464,7 +464,7 @@ class Director:
         turn.timing.reported = True
         turn.timing.mark("total")
         report = turn.timing.report()
-        self.timings.append(report)
+        self.timings.append(report | {"at": round(time.time(), 3)})
         log.info("turn %s latency: %s", turn.id,
                  ", ".join(f"{k[:-3]} {v} ms" for k, v in report.items() if k != "turn_id"))
         task = asyncio.get_running_loop().create_task(self.out.send_json("turn_timing", report))

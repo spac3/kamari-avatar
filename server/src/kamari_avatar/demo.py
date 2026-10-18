@@ -1,7 +1,8 @@
-"""M1 demo: walk the avatar somewhere, have it say a line, and wait for the browser's events.
+"""Demo: walk the avatar somewhere and have it say a line, or ask it something, and wait for the browser.
 
     python -m kamari_avatar.demo                      # sofa, default line
     python -m kamari_avatar.demo window "Nice view, isn't it?"
+    python -m kamari_avatar.demo --ask "go to the window and wave"   # a whole turn through the LLM
 
 Needs the backend running with debug endpoints on and a browser tab connected (tap the
 start button first so audio is unlocked).
@@ -20,12 +21,14 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("location", nargs="?", default="sofa")
     p.add_argument("line", nargs="?", default="Hello, welcome. Let me show you around the studio.")
+    p.add_argument("--ask", help="say this to Kamari instead, as if typed, and wait for the whole reply")
     p.add_argument("--server", default="http://127.0.0.1:8000")
     p.add_argument("--session", help="session id (default: the most recently active browser)")
     p.add_argument("--timeout", type=float, default=60)
     a = p.parse_args(argv)
 
-    body = {"steps": [{"walk_to": a.location}, {"say": a.line}], "timeout_s": a.timeout}
+    steps = [{"ask": a.ask}] if a.ask else [{"walk_to": a.location}, {"say": a.line}]
+    body = {"steps": steps, "timeout_s": a.timeout}
     if a.session:
         body["session_id"] = a.session
     req = urllib.request.Request(f"{a.server}/debug/run", data=json.dumps(body).encode(),
@@ -42,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
 
     for e in result["events"]:
         ev = e["event"]
+        if ev["type"] in ("turn_done", "turn_cancelled"):
+            print(f"heard    {ev['transcript']!r}\nreplied  {ev['reply']!r}\nactions  {', '.join(ev['actions']) or '-'}")
+            print("latency  " + ", ".join(f"{k[:-3]} {v} ms" for k, v in ev["timing"].items() if k != "turn_id"))
+            continue
         step = next(iter(e["step"].items()))
         detail = {k: v for k, v in ev.items() if k not in ("type", "cmd_id", "utterance_id")}
         print(f"{step[0]:8} {step[1]!r:40.40} -> {ev['type']} {json.dumps(detail)}")

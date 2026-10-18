@@ -58,6 +58,23 @@ describe('locomotion', () => {
   });
 });
 
+describe('facing', () => {
+  it('turns on the spot without reporting an arrival, and never interrupts a walk', () => {
+    const body = new THREE.Object3D();
+    const loco = new Locomotion(body, new StubAnim());
+    const arrived: string[] = [];
+    loco.onArrived = (c) => arrived.push(c.cmdId);
+    loco.face(180);
+    for (let i = 0; i < 60; i++) loco.update(1 / 60);
+    expect(Math.abs(angleDelta(body.rotation.y, Math.PI))).toBeLessThan(0.03);
+    expect(loco.state).toBe('idle');
+    expect(arrived).toEqual([]);
+    loco.start({ cmdId: 'w', path: [{ x: 0, z: 0 }, { x: 0, z: -2 }], location: null, faceDeg: null, speed: 'walk' });
+    loco.face(0);
+    expect(loco.cmd?.cmdId).toBe('w');
+  });
+});
+
 describe('lip sync', () => {
   it('follows the audio clock and blends into the next viseme', () => {
     const ls = new TimelineLipSync({ blendS: 0.05, gain: 1 });

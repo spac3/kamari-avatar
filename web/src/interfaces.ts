@@ -84,10 +84,29 @@ export interface AudioPlayer {
   stop(): void;
 }
 
+/** Microphone as 16 kHz PCM16 mono frames. Opened once (needs a user gesture) and kept open. */
 export interface MicCapture {
-  start(): Promise<void>;
-  stop(): void;
+  /** True while the mic stream is open and live (phones may end it in the background). */
+  readonly ready: boolean;
+  open(ctx: AudioContext): Promise<void>;
+  /** Start delivering frames. */
+  start(): void;
+  /** Stop delivering frames; resolves after the last buffered samples went out. */
+  stop(): Promise<void>;
   onFrame(cb: (pcm16k: Int16Array) => void): void;
+  close(): void;
+}
+
+/** Upper-body gestures layered over whatever clip the body plays (walking, idling, talking). */
+export interface GesturePlayer {
+  list(): string[];
+  readonly playing: string | null;
+  /** Start a gesture, replacing any running one; `onDone(true)` when it ends, `onDone(false)` if replaced. */
+  play(name: string, onDone?: (completed: boolean) => void): boolean;
+  /** Turn the head towards a world point (null: back to neutral). */
+  lookAt(target: THREE.Vector3 | null): void;
+  /** Call after the animation library's update and before the avatar's. */
+  update(dt: number): void;
 }
 
 export interface AudioFrame { kind: number; streamId: number; seq: number; pcm: Int16Array }
@@ -100,6 +119,8 @@ export interface ProtocolClient {
   connect(): void;
   close(): void;
   send<T extends ClientType>(type: T, data: ClientData<T>): void;
+  /** Binary frame, e.g. mic audio from encodeAudioFrame. Dropped while disconnected. */
+  sendBinary(frame: ArrayBuffer): void;
   on<T extends ServerType>(type: T, cb: (msg: ServerMsg<T>) => void): () => void;
   /** Binary frames: [u8 kind][u32 stream_id][u32 seq][payload], header big-endian. */
   onBinary(cb: (frame: AudioFrame) => void): () => void;

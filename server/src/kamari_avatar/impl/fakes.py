@@ -61,11 +61,12 @@ class FakeSTT:
 
 @register("llm", "fake")
 class FakeLLM:
-    """Streams a fixed reply word by word, then an optional tool call."""
+    """Streams a fixed reply word by word, then optional tool calls (`tool_call` or a `tool_calls` list)."""
 
-    def __init__(self, reply: str = "Hello!", tool_call: dict[str, Any] | None = None, delay_s: float = 0.0) -> None:
+    def __init__(self, reply: str = "Hello!", tool_call: dict[str, Any] | None = None,
+                 tool_calls: list[dict[str, Any]] | None = None, delay_s: float = 0.0) -> None:
         self.reply = reply
-        self.tool_call = tool_call
+        self.tool_calls = list(tool_calls or []) + ([tool_call] if tool_call else [])
         self.delay_s = delay_s
 
     async def stream(self, messages: Sequence[ChatMessage], tools: Sequence[ToolSpec]) -> AsyncIterator[LLMEvent]:
@@ -74,11 +75,11 @@ class FakeLLM:
             if self.delay_s:
                 await asyncio.sleep(self.delay_s)
             yield TextDelta(w if i == 0 else " " + w)
-        if self.tool_call and any(t.name == self.tool_call["name"] for t in tools):
-            yield ToolCall("call_fake_1", self.tool_call["name"], dict(self.tool_call.get("arguments", {})))
-            yield Done("tool_calls")
-        else:
-            yield Done("stop")
+        names = {t.name for t in tools}
+        calls = [c for c in self.tool_calls if c["name"] in names]
+        for i, c in enumerate(calls):
+            yield ToolCall(f"call_fake_{i + 1}", c["name"], dict(c.get("arguments", {})))
+        yield Done("tool_calls" if calls else "stop")
 
 
 # Rough phoneme stand-ins per letter so fake speech still produces moving visemes.

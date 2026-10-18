@@ -1,12 +1,23 @@
 /**
  * Which implementation backs each browser interface. Swap one by changing `impl`,
- * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline`.
+ * or override at runtime with a query string, e.g. `?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake`.
  */
 import { ClipAnimationLibrary } from './anim/ClipAnimationLibrary';
+import { ProceduralGestures } from './anim/ProceduralGestures';
 import { ProceduralIdle } from './anim/ProceduralIdle';
 import { FakeAvatar } from './avatar/FakeAvatar';
 import { VrmAvatarAdapter } from './avatar/VrmAvatarAdapter';
-import type { AnimationLibrary, AvatarAdapter, LipSyncDriver, NavigationProvider, ProtocolClient, RoomProvider } from './interfaces';
+import type {
+  AnimationLibrary,
+  AvatarAdapter,
+  GesturePlayer,
+  LipSyncDriver,
+  MicCapture,
+  NavigationProvider,
+  ProtocolClient,
+  RoomProvider,
+} from './interfaces';
+import { FakeMicCapture, WorkletMicCapture } from './mic/WorkletMicCapture';
 import { RecastNavigation, StraightLineNavigation } from './nav/RecastNavigation';
 import { OfflineProtocolClient, WebSocketProtocolClient, type WsClientOptions } from './net/WebSocketProtocolClient';
 import { register } from './registry';
@@ -23,6 +34,8 @@ export interface ClientConfig {
   room: Spec;
   net: Spec;
   lipSync: Spec;
+  mic: Spec;
+  gestures: Spec;
   quality: 'auto' | 'desktop' | 'mobile' | 'low';
   debug: boolean;
 }
@@ -35,6 +48,8 @@ export const defaultConfig: ClientConfig = {
   room: { impl: 'procedural' },
   net: { impl: 'websocket', options: { path: '/ws' } },
   lipSync: { impl: 'timeline' },
+  mic: { impl: 'worklet', options: { tailMs: 120 } },
+  gestures: { impl: 'procedural' },
   quality: 'auto',
   debug: false,
 };
@@ -51,6 +66,8 @@ export function configFromQuery(search: string, base: ClientConfig = defaultConf
     room: pick('roomImpl', base.room),
     net: pick('net', base.net),
     lipSync: pick('lipsync', base.lipSync),
+    mic: pick('mic', base.mic),
+    gestures: pick('gestures', base.gestures),
     quality: (q.get('quality') as ClientConfig['quality']) ?? base.quality,
     debug: q.has('debug') || base.debug,
   };
@@ -70,4 +87,7 @@ export function registerBuiltins(): void {
   register<RoomProvider>('room', 'procedural', () => new ProceduralRoom());
   register<ProtocolClient>('net', 'websocket', (o) => new WebSocketProtocolClient(o as unknown as WsClientOptions));
   register<ProtocolClient>('net', 'offline', () => new OfflineProtocolClient());
+  register<MicCapture>('mic', 'worklet', () => new WorkletMicCapture());
+  register<MicCapture>('mic', 'fake', () => new FakeMicCapture());
+  register<GesturePlayer>('gestures', 'procedural', (o) => new ProceduralGestures(o.avatar as AvatarAdapter));
 }

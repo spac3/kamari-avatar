@@ -216,7 +216,7 @@ def create_app(config_path: str | Path = DEFAULT_CONFIG) -> FastAPI:
     @app.get("/latency")
     async def latency() -> dict[str, Any]:
         """Per-stage timings of recent turns (ms from the end of the user's speech), newest last."""
-        turns = sorted((t for d in hub.directors.values() for t in d.timings), key=lambda t: t.get("total_ms", 0))
+        turns = sorted((t for d in hub.directors.values() for t in d.timings), key=lambda t: t["at"])
         return {"turns": turns[-50:]}
 
     if comps.debug.endpoints or os.environ.get("KAMARI_AVATAR_DEBUG") == "1":

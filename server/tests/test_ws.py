@@ -217,3 +217,20 @@ def test_hiding_the_tab_stops_the_reply():
         got = receive_until(ws, ["speech_cancel"])
         assert got[-1]["data"] == {"utterance_id": uid, "reason": "hidden"}
         assert app.state.hub.directors[sid].session.visible is False
+
+
+def test_debug_run_asks_a_whole_turn():
+    with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
+        ready(ws)
+        result = {}
+        t = threading.Thread(target=lambda: result.update(
+            client.post("/debug/run", json={"steps": [{"ask": "go to the sofa"}], "timeout_s": 10}).json()))
+        t.start()
+        got = receive_until(ws, ["speech_start", "speech_end", "walk_to"])
+        uid = next(m for m in got if isinstance(m, dict) and m["type"] == "speech_start")["data"]["utterance_id"]
+        ws.send_json(msg("speech_started", {"utterance_id": uid}))
+        ws.send_json(msg("speech_finished", {"utterance_id": uid, "interrupted": False, "played_ms": 900}))
+        t.join(10)
+        ev = result["events"][0]["event"]
+        assert result["ok"] and ev["type"] == "turn_done" and ev["actions"] == ["walk_to(sofa)"]
+        assert ev["speech"]["type"] == "speech_finished" and "first_audio_ms" in ev["timing"]

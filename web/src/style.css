@@ -7,8 +7,9 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
 .chip { background: var(--panel); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted); }
 .chip b { color: var(--fg); font-weight: 600; }
 #status { flex-basis: 100%; }
-.panel { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 20px);
-  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; background: var(--panel); padding: 8px; border-radius: 14px; }
+.dock { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  width: min(560px, calc(100% - 20px)); display: flex; flex-direction: column; gap: 6px; }
+.panel { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; background: var(--panel); padding: 8px; border-radius: 14px; }
 .panel button { border: 0; border-radius: 10px; padding: 8px 12px; background: #fff; color: var(--fg); font: inherit; min-height: 40px; }
 .panel button.secondary { background: transparent; color: var(--accent); }
 #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(244, 239, 230, 0.7); backdrop-filter: blur(4px); }
@@ -16,3 +17,13 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
 #start { border: 0; border-radius: 16px; padding: 18px 28px; font: 600 18px system-ui, sans-serif; background: var(--accent); color: #fff; min-width: 240px; }
 #say { display: flex; gap: 6px; flex-basis: 100%; }
 #say input { flex: 1; min-width: 0; border: 1px solid #ddd5c8; border-radius: 10px; padding: 8px 10px; font: 16px system-ui, sans-serif; background: #fff; }
+#talk { flex-basis: 100%; min-height: 56px; font-weight: 600; background: var(--accent); color: #fff; touch-action: none;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#talk[data-state='talking'] { background: #c2462a; }
+#talk[data-state='opening'], #talk[data-state='sending'] { background: #6b655c; }
+.captions { pointer-events: none; display: grid; gap: 4px; }
+.captions p { margin: 0; background: var(--panel); border-radius: 10px; padding: 4px 10px; font-size: 13px; }
+.captions p:has(span:empty) { display: none; }
+.captions b { color: var(--accent); margin-right: 4px; }
+/* Phones: the place buttons are a debug aid; keep the screen for the avatar unless ?debug. */
+body.compact #locations, body.compact #toggle-nav { display: none !important; }
