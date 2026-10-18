@@ -466,6 +466,35 @@ class TurnTimingMessage(BaseModel):
     ]
 
 
+class TokenUsageData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    turn_id: str
+    input_tokens: Annotated[int, Field(ge=0)]
+    output_tokens: Annotated[int, Field(ge=0)]
+    total_input_tokens: Annotated[
+        int, Field(description='whole conversation so far', ge=0)
+    ]
+    total_output_tokens: Annotated[
+        int, Field(description='whole conversation so far', ge=0)
+    ]
+
+
+class TokenUsageMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    v: Literal[1]
+    type: Literal['token_usage']
+    id: str
+    ts: Annotated[int, Field(description='Unix ms')]
+    data: TokenUsageData
+    seq: Annotated[
+        int, Field(description='Monotonic per session, used by resume', ge=0)
+    ]
+
+
 class Capabilities(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -944,6 +973,7 @@ class ServerMessage(
         | StateSyncMessage
         | PongMessage
         | TurnTimingMessage
+        | TokenUsageMessage
     ]
 ):
     root: Annotated[
@@ -963,7 +993,8 @@ class ServerMessage(
         | ErrorMessage
         | StateSyncMessage
         | PongMessage
-        | TurnTimingMessage,
+        | TurnTimingMessage
+        | TokenUsageMessage,
         Field(title='ServerMessage'),
     ]
 

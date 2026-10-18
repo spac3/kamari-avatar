@@ -7,9 +7,22 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
 .chip { background: var(--panel); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--muted); }
 .chip b { color: var(--fg); font-weight: 600; }
 #status { flex-basis: 100%; }
-.dock { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
-  width: min(560px, calc(100% - 20px)); display: flex; flex-direction: column; gap: 6px; }
-.panel { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; background: var(--panel); padding: 8px; border-radius: 14px; }
+/* The chat window: bottom left, beside the avatar and clear of the touch pads on the glass. */
+.dock { position: fixed; bottom: max(10px, env(safe-area-inset-bottom)); left: max(10px, env(safe-area-inset-left));
+  width: clamp(280px, 30vw, 380px); display: flex; flex-direction: column; background: var(--panel); border-radius: 14px;
+  box-shadow: 0 4px 18px rgba(29, 27, 24, 0.12); overflow: hidden; }
+.chat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 8px 12px 4px; font-size: 12px; color: var(--muted); }
+.chat-head b { color: var(--fg); font-size: 13px; }
+#log { list-style: none; margin: 0; padding: 4px 10px; height: min(260px, 32vh); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; overscroll-behavior: contain; }
+#log li { max-width: 88%; padding: 5px 10px; border-radius: 12px; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
+#log li b { display: block; font-size: 11px; color: var(--accent); }
+#log li.you { align-self: flex-end; background: #e4f0ec; }
+#log li.you.empty .text { color: var(--muted); font-style: italic; }
+#log li.kamari { align-self: flex-start; background: #fff; }
+#log li.quiet { background: transparent; padding-top: 0; padding-bottom: 0; }
+#log li.quiet b, #log li.quiet .text { display: none; }
+#log .usage { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); }
+.panel { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 8px; border-top: 1px solid rgba(29, 27, 24, 0.08); }
 .panel button { border: 0; border-radius: 10px; padding: 8px 12px; background: #fff; color: var(--fg); font: inherit; min-height: 40px; }
 .panel button.secondary { background: transparent; color: var(--accent); }
 #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(244, 239, 230, 0.7); backdrop-filter: blur(4px); }
@@ -24,9 +37,13 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
 /* Hands-free: a glow that follows how sure the voice detector is that someone is talking. */
 #talk[data-state='listening'] { box-shadow: 0 0 0 calc(var(--voice, 0) * 6px) rgba(47, 125, 109, 0.45); transition: box-shadow 80ms; }
 #talk[data-state='muted'] { background: #6b655c; }
-.captions { pointer-events: none; display: grid; gap: 4px; }
-.captions p { margin: 0; background: var(--panel); border-radius: 10px; padding: 4px 10px; font-size: 13px; }
-.captions p:has(span:empty) { display: none; }
-.captions b { color: var(--accent); margin-right: 4px; }
 /* Phones: the place buttons are a debug aid; keep the screen for the avatar unless ?debug. */
 body.compact #locations, body.compact #toggle-nav { display: none !important; }
+/* Narrow screens: no room beside the avatar, so the chat spans the bottom with a shorter log
+   (the avatar is framed above it), and the talk button shares a row with hands-free. */
+@media (max-width: 700px) {
+  .dock { left: 50%; transform: translateX(-50%); width: calc(100% - 20px); }
+  #log { height: min(110px, 16vh); }
+  #talk { flex: 1 1 auto; min-height: 48px; }
+  .chat-head { padding-top: 6px; }
+}

@@ -10,7 +10,7 @@ import pytest
 from kamari_avatar.config import BackendConfig, ComponentSpec, build
 from kamari_avatar.director import Director
 from kamari_avatar.impl.openai_llm import OpenAICompatibleLLM, ThinkFilter
-from kamari_avatar.interfaces import ChatMessage, Done, TextDelta, ToolCall, ToolSpec
+from kamari_avatar.interfaces import ChatMessage, Done, TextDelta, ToolCall, ToolSpec, Usage
 from kamari_avatar.session import Session
 
 TEST_CONFIG = Path(__file__).with_name("backend.test.yaml")
@@ -102,6 +102,24 @@ def test_missing_key_falls_back_to_the_configured_fallback(monkeypatch):
                             fallback="fake", fallback_options={"reply": "My language model is not set up."})
     comps = build(cfg)
     assert comps.active["llm"] == "fake" and comps.llm.reply == "My language model is not set up."
+
+
+async def test_reports_token_usage_from_the_last_chunk():
+    # With include_usage the server ends with a chunk that has no choices, only usage.
+    last = {"id": "x", "object": "chat.completion.chunk", "created": 0, "model": "m", "choices": [],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 7, "total_tokens": 127}}
+    provider = FakeProvider(sse(chunk({"content": "Hi!"}), chunk({}, "stop"), last))
+    llm = OpenAICompatibleLLM("m", api_key_env=None, http_client=provider.client())
+    assert (await collect(llm, [ChatMessage("user", "hi")]))[-1] == Done("stop", Usage(120, 7))
+    assert provider.sent()["stream_options"] == {"include_usage": True}
+
+
+async def test_reports_groq_style_usage_and_can_skip_asking():
+    last = chunk({}, "stop") | {"x_groq": {"usage": {"prompt_tokens": 50, "completion_tokens": 3}}}
+    provider = FakeProvider(sse(chunk({"content": "Hi!"}), last))
+    llm = OpenAICompatibleLLM("m", api_key_env=None, stream_usage=False, http_client=provider.client())
+    assert (await collect(llm, [ChatMessage("user", "hi")]))[-1] == Done("stop", Usage(50, 3))
+    assert "stream_options" not in provider.sent()
 
 
 async def test_bad_tool_arguments_are_flagged():

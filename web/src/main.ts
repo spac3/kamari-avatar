@@ -31,6 +31,7 @@ import { create } from './registry';
 import { loadManifest, type PanelControl } from './room/manifest';
 import { SpeechPlayer } from './speech/SpeechPlayer';
 import { ScreenGlass } from './touch/ScreenGlass';
+import { ChatLog } from './ui/ChatLog';
 import './style.css';
 
 const VERSION = '0.1.0';
@@ -99,10 +100,13 @@ function frame(): void {
   const at = (bone: string, fallback: number) => avatar.bone(bone)?.getWorldPosition(new THREE.Vector3()).y ?? fallback;
   const waist = (at('hips', 0.9) + at('spine', 1.0)) / 2 + 0.06;
   const top = new THREE.Box3().setFromObject(body).max.y + 0.06;
-  // Screen fractions (from the top) the avatar spans: below the status chips, above the dock.
+  // Screen fractions (from the top) the avatar spans: below the status chips, and above the chat
+  // window when it spans the bottom (narrow screens); beside it, the view keeps a fixed bottom margin.
   const h = canvas.clientHeight || 1;
   const yTop = Math.min(0.3, document.querySelector('.hud')!.getBoundingClientRect().bottom / h + 0.02);
-  const yWaist = Math.max(0.6, document.querySelector('.dock')!.getBoundingClientRect().top / h);
+  const dock = document.querySelector('.dock')!.getBoundingClientRect();
+  const beside = dock.right < (canvas.clientWidth || 1) * 0.35;
+  const yWaist = beside ? 0.75 : Math.max(0.55, dock.top / h - 0.05); // the touch pads sit just above the waist
   const halfV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   // Room for the shoulders and a bit of arm on a narrow portrait screen.
   const l = avatar.bone('leftUpperArm')?.getWorldPosition(new THREE.Vector3());
@@ -125,7 +129,8 @@ function frame(): void {
 
 // ---------------------------------------------------------------- HUD
 const $ = (id: string) => document.getElementById(id)!;
-const hud = { fps: $('fps'), conn: $('conn'), quality: $('quality'), status: $('status'), latency: $('latency'), you: $('you'), kamari: $('kamari') };
+const hud = { fps: $('fps'), conn: $('conn'), quality: $('quality'), status: $('status'), latency: $('latency') };
+const chat = new ChatLog($('log'), $('tokens'));
 
 // ---------------------------------------------------------------- components
 const room = create<RoomProvider>('room', cfg.room);
@@ -607,7 +612,7 @@ function buildTalkButton(): void {
     if (micMode !== 'ptt') return;
     btn.dataset.state = st;
     label.textContent = { idle: 'Hold to talk', opening: 'Allow the microphone…', talking: 'Listening… release to send', sending: 'Sending…' }[st];
-    if (st === 'talking') hud.you.textContent = '…';
+    if (st === 'talking') chat.listening();
   };
   ptt.onError = micError;
   openMic.onError = micError;
@@ -615,7 +620,7 @@ function buildTalkButton(): void {
     if (micMode !== 'open') return;
     btn.dataset.state = { off: muted ? 'muted' : 'idle', opening: 'opening', listening: 'listening', maybe: 'listening', speaking: 'talking' }[st];
     label.textContent = muted ? 'Muted: tap to listen' : { off: 'Tap to listen', opening: 'Allow the microphone…', listening: 'Listening: just talk', maybe: 'Listening: just talk', speaking: 'Hearing you…' }[st];
-    if (st === 'speaking') hud.you.textContent = '…';
+    if (st === 'speaking') chat.listening();
     if (st === 'listening' && openMic.detector !== 'silero') hud.status.textContent = `Voice detection: ${openMic.detector}`;
   };
   openMic.onProb = (p) => btn.style.setProperty('--voice', p.toFixed(2));
@@ -718,13 +723,13 @@ async function start(): Promise<void> {
   net.on('speech_start', (m) => speech.onStart(m));
   net.on('speech_chunk', (m) => {
     speech.onChunk(m);
-    if (m.data.text && m.data.seq === 0) hud.kamari.textContent = m.data.text;
-    else if (m.data.text && !hud.kamari.textContent?.endsWith(m.data.text)) hud.kamari.textContent += ` ${m.data.text}`;
+    if (m.data.text) chat.kamari(m.data.text);
   });
   net.on('gesture', (m) => gesture(m.data));
   net.on('look_at', (m) => lookAt(m.data));
   net.on('press_control', (m) => pressControl(m.data));
-  net.on('transcript', (m) => (hud.you.textContent = m.data.text || '(nothing heard)'));
+  net.on('transcript', (m) => chat.user(m.data.text));
+  net.on('token_usage', (m) => chat.usage(m.data));
   net.on('turn_timing', (m) => {
     const ms = m.data.first_audio_ms ?? m.data.tts_first_audio_ms;
     if (ms !== undefined) hud.latency.textContent = `${(ms / 1000).toFixed(2)} s`;

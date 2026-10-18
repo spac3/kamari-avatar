@@ -10,7 +10,7 @@ import pytest
 from kamari_avatar.config import BackendConfig, build
 from kamari_avatar.director import Director
 from kamari_avatar.impl.fakes import FakeToolProvider
-from kamari_avatar.interfaces import AudioSegment, Done, TextDelta, ToolCall
+from kamari_avatar.interfaces import AudioSegment, Done, TextDelta, ToolCall, Usage
 from kamari_avatar.protocol import Vec2
 from kamari_avatar.session import Session
 
@@ -111,6 +111,25 @@ async def test_speaks_sentences_as_they_stream_and_walks_then_waves():
     assert json.loads(history[3].content) == {"status": "queued"}
     timing = result["timing"]
     assert {"llm_first_token_ms", "first_sentence_ms", "tts_first_audio_ms"} <= timing.keys()
+
+
+async def test_token_usage_adds_up_every_round_and_every_turn():
+    provider = FakeToolProvider("kamari", tools=[{"name": "kamari__tasks_list", "description": "List tasks"}])
+    llm = ScriptedLLM([ToolCall("c1", "kamari__tasks_list", {}), Done("tool_calls", Usage(100, 10))],
+                      [TextDelta("Found it."), Done("stop", Usage(150, 5))],
+                      [TextDelta("Bye."), Done("stop", Usage(200, 2))],
+                      [TextDelta("No count."), Done("stop")])
+    d, browser = make(llm, providers=[provider])
+    first = await run(d, "look it up")
+    assert first["usage"] == {"input_tokens": 250, "output_tokens": 15}
+    await run(d, "bye")
+    await run(d, "again")  # a provider that reports nothing sends nothing
+    await asyncio.sleep(0)
+    assert browser.of("token_usage") == [
+        {"turn_id": browser.of("token_usage")[0]["turn_id"], "input_tokens": 250, "output_tokens": 15,
+         "total_input_tokens": 250, "total_output_tokens": 15},
+        {"turn_id": browser.of("token_usage")[1]["turn_id"], "input_tokens": 200, "output_tokens": 2,
+         "total_input_tokens": 450, "total_output_tokens": 17}]
 
 
 async def test_arrival_is_told_to_the_llm_next_turn():

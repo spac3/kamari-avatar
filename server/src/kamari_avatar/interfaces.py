@@ -82,8 +82,20 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class Usage:
+    """Tokens one LLM call used, as the provider counted them."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def __add__(self, other: Usage) -> Usage:
+        return Usage(self.input_tokens + other.input_tokens, self.output_tokens + other.output_tokens)
+
+
+@dataclass(frozen=True)
 class Done:
     reason: Literal["stop", "tool_calls", "length", "cancelled"] = "stop"
+    usage: Usage | None = None  # None when the provider does not report it
 
 
 LLMEvent = TextDelta | ToolCall | Done
@@ -116,7 +128,10 @@ class STTEngine(Protocol):
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """Streams text and tool calls. Must stop promptly when the consumer stops iterating."""
+    """Streams text and tool calls, then Done. Must stop promptly when the consumer stops iterating.
+
+    Done.usage carries the tokens the call used when the provider reports them; the chat shows the
+    conversation's running total."""
 
     def stream(self, messages: Sequence[ChatMessage], tools: Sequence[ToolSpec]) -> AsyncIterator[LLMEvent]: ...
 
