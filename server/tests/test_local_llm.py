@@ -45,6 +45,8 @@ async def test_conversation_runs_on_the_local_model():
     d = browser.director = Director(Session(id="s", resume_token="t", room_id="studio"), comps, browser, comps.director)
     result = await d.wait_turn(await d.converse("Please walk over to the window."), 120)
     print(f"\nreply: {result.get('reply')!r}\nactions: {result.get('actions')}\ntiming: {result.get('timing')}")
+    for m in comps.store.history("s"):  # what the model said and what each tool call got back
+        print(f"  {m.role}: {m.content!r} {m.tool_calls or ''}")
     assert result["type"] == "turn_done", result
     assert not [data for t, data in browser.sent if t == "error"]
     assert result["reply"] or result["actions"]  # it answered in words, actions or both
