@@ -32,11 +32,13 @@ class PiperTTS:
       model        path to the voice .onnx, relative to the repo root unless absolute
       speaker      speaker id for multi-speaker voices
       length_scale speaking rate; >1 is slower
+      noise_scale, noise_w_scale  random variation per synthesis (voice defaults; 0 is repeatable)
       alignments   ask Piper for phoneme timings (patches the model in memory; needs `onnx`)
     """
 
     def __init__(self, model: str, *, base_dir: str | Path = REPO_ROOT, speaker: int | None = None,
-                 length_scale: float | None = None, alignments: bool = True, use_cuda: bool = False) -> None:
+                 length_scale: float | None = None, noise_scale: float | None = None,
+                 noise_w_scale: float | None = None, alignments: bool = True, use_cuda: bool = False) -> None:
         try:
             from piper import PiperVoice, SynthesisConfig
         except ImportError as e:
@@ -49,7 +51,9 @@ class PiperTTS:
         self.alignments = alignments
         self.voice = PiperVoice.load(path, include_alignments=alignments, use_cuda=use_cuda)
         self.sample_rate: int = self.voice.config.sample_rate
-        self._syn = SynthesisConfig(speaker_id=speaker, length_scale=length_scale)
+        # The noise settings vary each synthesis at random (None: the voice's own); 0 makes it repeatable.
+        self._syn = SynthesisConfig(speaker_id=speaker, length_scale=length_scale, noise_scale=noise_scale,
+                                    noise_w_scale=noise_w_scale)
         log.info("Piper voice %s loaded (%d Hz, alignments=%s)", path.name, self.sample_rate, alignments)
 
     def _chunks(self, text: str) -> Iterator[SynthChunk]:
