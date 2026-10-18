@@ -877,7 +877,7 @@ class Protocol(RootModel[ServerMessage | ClientMessage]):
     root: Annotated[
         ServerMessage | ClientMessage,
         Field(
-            description='Kamari avatar WebSocket protocol v1. Source of truth for generated Python and TypeScript types. Binary audio frames: [u8 kind][u32 stream_id][u32 seq][payload], kind 0x01 = mic PCM16 16 kHz (client to server), 0x02 = TTS PCM16 (server to client).',
+            description='Kamari avatar WebSocket protocol v1. Source of truth for generated Python and TypeScript types. Binary audio frames: [u8 kind][u32 stream_id][u32 seq][payload], header big-endian, PCM16 payload little-endian; kind 0x01 = mic PCM16 16 kHz (client to server), 0x02 = TTS PCM16 (server to client).',
             title='Protocol',
         ),
     ]

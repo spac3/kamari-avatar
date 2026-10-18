@@ -24,14 +24,37 @@ export interface AvatarAdapter {
   lookAt(target: THREE.Vector3 | null): void;
   /** Normalized humanoid bone by standard name (hips, spine, head, leftUpperArm...). */
   bone(name: string): THREE.Object3D | null;
+  /** Skeleton details animation retargeting needs; null for avatars clips cannot drive. */
+  rig(): HumanoidRig | null;
   update(dt: number): void;
   dispose(): void;
 }
 
-/** Animation source for an avatar: retargeted clips (M1+) or procedural motion (M0). */
+export interface HumanoidRig {
+  /** Root to bind an AnimationMixer to. */
+  readonly root: THREE.Object3D;
+  /** Scene node name of a normalized humanoid bone (hips, leftUpperArm...), or null if the avatar lacks it. */
+  nodeName(bone: string): string | null;
+  /** Hips height above the floor in the rest pose, metres. */
+  readonly hipsHeight: number;
+  /** True when the rig's model space faces -Z (VRM 0.x), so clips must be mirrored. */
+  readonly facesNegativeZ: boolean;
+}
+
+/**
+ * Body motion for an avatar under logical names: idle, talk, walk, run, and any gestures.
+ * Backed by retargeted clips (CC0 Universal Animation Library) or procedural motion.
+ */
 export interface AnimationLibrary {
+  /** Prepare clips for the loaded avatar. Call after AvatarAdapter.load. */
+  load(): Promise<void>;
   list(): string[];
+  readonly current: string | null;
   play(name: string, opts?: { fadeS?: number; loop?: boolean }): void;
+  /** Ground speed (m/s) a locomotion clip shows at time scale 1 on this avatar; null if not locomotion. */
+  groundSpeed(name: string): number | null;
+  /** Playback rate of the current clip; locomotion matches it to actual speed to stop foot sliding. */
+  setTimeScale(scale: number): void;
   update(dt: number): void;
 }
 
@@ -48,7 +71,7 @@ export interface RoomProvider {
 }
 
 export interface LipSyncDriver {
-  /** Start a timeline relative to an AudioContext time. Omit visemes for audio-driven drivers. */
+  /** Add a chunk's timeline (ms from chunk start) starting at an AudioContext time. Omit visemes for audio-driven drivers. */
   start(startAt: number, visemes?: { t: number; v: Viseme }[]): void;
   stop(): void;
   update(audioTime: number, avatar: AvatarAdapter): void;
@@ -67,6 +90,8 @@ export interface MicCapture {
   onFrame(cb: (pcm16k: Int16Array) => void): void;
 }
 
+export interface AudioFrame { kind: number; streamId: number; seq: number; pcm: Int16Array }
+
 export type ConnectionState = 'offline' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 export interface ProtocolClient {
@@ -76,6 +101,8 @@ export interface ProtocolClient {
   close(): void;
   send<T extends ClientType>(type: T, data: ClientData<T>): void;
   on<T extends ServerType>(type: T, cb: (msg: ServerMsg<T>) => void): () => void;
+  /** Binary frames: [u8 kind][u32 stream_id][u32 seq][payload], header big-endian. */
+  onBinary(cb: (frame: AudioFrame) => void): () => void;
   onState(cb: (s: ConnectionState) => void): () => void;
 }
 

@@ -1,22 +1,35 @@
 import type { AnimationLibrary, AvatarAdapter } from '../interfaces';
+import { Blinker } from './Blinker';
 
 /**
- * M0 animation source: arms down from the T-pose, breathing, weight shift and blinking,
- * driven directly on humanoid bones. Replaced by retargeted CC0 clips (Quaternius UAL) in M1
- * through the same AnimationLibrary interface.
+ * Fallback animation source with no assets: arms down from the T-pose, breathing, weight shift
+ * and blinking, driven directly on humanoid bones. Walking glides (no leg motion); use the clip
+ * library for real locomotion.
  */
 export class ProceduralIdle implements AnimationLibrary {
+  current: string | null = 'idle';
   private t = 0;
-  private nextBlink = 2;
-  private blinkT = -1;
+  private readonly blinker: Blinker;
 
-  constructor(private readonly avatar: AvatarAdapter, private readonly rand: () => number = Math.random) {}
-
-  list(): string[] {
-    return ['idle'];
+  constructor(private readonly avatar: AvatarAdapter, rand: () => number = Math.random) {
+    this.blinker = new Blinker(avatar, rand);
   }
 
-  play(): void {}
+  async load(): Promise<void> {}
+
+  list(): string[] {
+    return ['idle', 'talk', 'walk'];
+  }
+
+  play(name: string): void {
+    this.current = name;
+  }
+
+  groundSpeed(): number | null {
+    return null;
+  }
+
+  setTimeScale(): void {}
 
   update(dt: number): void {
     this.t += dt;
@@ -34,18 +47,6 @@ export class ProceduralIdle implements AnimationLibrary {
     a.bone('hips')?.rotation.set(0, 0.03 * sway, -0.02 * sway);
     a.bone('neck')?.rotation.set(-0.01 * breath, 0.04 * Math.sin(t * 0.37), 0);
     a.bone('head')?.rotation.set(0.02 * Math.sin(t * 0.23), 0.05 * Math.sin(t * 0.31), 0.02 * sway);
-
-    // Blink: 120 ms close-open every 2-6 s.
-    if (this.blinkT < 0 && t >= this.nextBlink) this.blinkT = 0;
-    if (this.blinkT >= 0) {
-      this.blinkT += dt;
-      const p = this.blinkT / 0.12;
-      a.setBlink(p < 0.5 ? p * 2 : Math.max(0, 2 - p * 2));
-      if (p >= 1) {
-        this.blinkT = -1;
-        this.nextBlink = t + 2 + this.rand() * 4;
-        a.setBlink(0);
-      }
-    }
+    this.blinker.update(dt);
   }
 }

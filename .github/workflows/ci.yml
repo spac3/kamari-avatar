@@ -16,6 +16,21 @@ jobs:
       - run: ruff check .
       - run: pytest -q
 
+  speech:
+    name: piper speech
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: server } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[dev,piper]"
+      - uses: actions/cache@v4
+        with: { path: server/voices, key: piper-en_US-ljspeech-medium }
+      - run: test -f voices/en_US-ljspeech-medium.onnx || python -m piper.download_voices en_US-ljspeech-medium --data-dir voices
+      - run: pytest -q tests/test_piper.py
+        env: { KAMARI_TEST_PIPER_VOICE: voices/en_US-ljspeech-medium.onnx }
+
   web:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: web } }

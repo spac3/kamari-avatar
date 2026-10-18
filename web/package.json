@@ -21,6 +21,8 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@types/node": "^26.6.4",
     "@types/three": "^0.186.0",
     "json-schema-to-typescript": "^16.0.0",

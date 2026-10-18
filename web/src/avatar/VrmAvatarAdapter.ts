@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-import type { AvatarAdapter } from '../interfaces';
+import type { AvatarAdapter, HumanoidRig } from '../interfaces';
 import type { Viseme } from '../protocol';
 import { vowelWeights, type VrmVowel } from './visemeMap';
 
 export class VrmAvatarAdapter implements AvatarAdapter {
   readonly object = new THREE.Group();
   private vrm: VRM | null = null;
+  private humanoidRig: HumanoidRig | null = null;
   private visemes: Partial<Record<Viseme, number>> = {};
   private readonly lookTarget = new THREE.Object3D();
 
@@ -30,6 +31,17 @@ export class VrmAvatarAdapter implements AvatarAdapter {
     });
     this.object.add(vrm.scene);
     this.vrm = vrm;
+    const humanoid = vrm.humanoid;
+    this.humanoidRig = {
+      root: vrm.scene,
+      nodeName: (bone) => humanoid.getNormalizedBoneNode(bone as never)?.name ?? null,
+      hipsHeight: humanoid.normalizedRestPose.hips?.position?.[1] ?? 1,
+      facesNegativeZ: vrm.meta.metaVersion === '0',
+    };
+  }
+
+  rig(): HumanoidRig | null {
+    return this.humanoidRig;
   }
 
   setViseme(viseme: Viseme, weight: number): void {
@@ -76,6 +88,6 @@ export class VrmAvatarAdapter implements AvatarAdapter {
 
   dispose(): void {
     if (this.vrm) VRMUtils.deepDispose(this.vrm.scene);
-    this.vrm = null;
+    this.vrm = this.humanoidRig = null;
   }
 }

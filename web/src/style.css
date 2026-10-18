@@ -14,3 +14,5 @@ html, body { margin: 0; height: 100%; background: #f4efe6; color: var(--fg); fon
 #overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(244, 239, 230, 0.7); backdrop-filter: blur(4px); }
 #overlay[hidden] { display: none; }
 #start { border: 0; border-radius: 16px; padding: 18px 28px; font: 600 18px system-ui, sans-serif; background: var(--accent); color: #fff; min-width: 240px; }
+#say { display: flex; gap: 6px; flex-basis: 100%; }
+#say input { flex: 1; min-width: 0; border: 1px solid #ddd5c8; border-radius: 10px; padding: 8px 10px; font: 16px system-ui, sans-serif; background: #fff; }

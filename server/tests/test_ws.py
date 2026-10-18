@@ -1,6 +1,16 @@
+import struct
+import threading
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from kamari_avatar.app import create_app
+from kamari_avatar.app import create_app as _create_app
+
+TEST_CONFIG = Path(__file__).with_name("backend.test.yaml")
+
+
+def create_app():
+    return _create_app(TEST_CONFIG)
 
 
 def msg(type_, data, id_="c1"):
@@ -44,3 +54,107 @@ def test_health_and_manifest():
     with TestClient(create_app()) as client:
         assert client.get("/health").json()["room"] == "studio"
         assert any(loc["name"] == "window" for loc in client.get("/manifest").json()["locations"])
+
+
+def ready(ws):
+    ws.send_json(HELLO)
+    return ws.receive_json()["data"]["session_id"]
+
+
+def test_text_box_walks_and_speaks():
+    with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
+        ready(ws)
+        ws.send_json(msg("user_text", {"text": "go to the sofa"}))
+        assert ws.receive_json()["type"] == "transcript"
+        walk = ws.receive_json()
+        assert walk["type"] == "walk_to" and walk["data"]["target"] == {"location": "sofa"}
+
+        ws.send_json(msg("user_text", {"text": "walk to the moon"}))
+        ws.receive_json()
+        err = ws.receive_json()
+        assert err["type"] == "error" and err["data"]["code"] == "unknown_location"
+
+        ws.send_json(msg("user_text", {"text": "say Hi Bob"}))
+        ws.receive_json()
+        start = ws.receive_json()
+        assert start["type"] == "speech_start" and start["data"]["text"] == "Hi Bob"
+        chunk = ws.receive_json()
+        assert chunk["type"] == "speech_chunk" and chunk["data"]["visemes"][-1]["v"] == "sil"
+        frame = ws.receive_bytes()
+        kind, stream_id, seq = struct.unpack(">BII", frame[:9])
+        assert (kind, stream_id, seq) == (2, chunk["data"]["stream_id"], 0)
+        samples = (len(frame) - 9) // 2
+        assert samples * 1000 // chunk["data"]["sample_rate"] == chunk["data"]["duration_ms"]
+        end = ws.receive_json()
+        assert end["type"] == "speech_end" and end["data"]["total_chunks"] == 1
+
+
+def test_debug_run_waits_for_the_browser():
+    with TestClient(create_app()) as client, client.websocket_connect("/ws") as ws:
+        sid = ready(ws)
+        result = {}
+        steps = [{"walk_to": "sofa"}, {"say": "Hello, welcome."}]
+        t = threading.Thread(target=lambda: result.update(client.post("/debug/run", json={"steps": steps}).json()))
+        t.start()
+        walk = ws.receive_json()
+        assert walk["type"] == "walk_to"
+        ws.send_json(msg("arrived", {"cmd_id": walk["data"]["cmd_id"], "location": "sofa",
+                                     "position": {"x": -2.6, "z": -1.5}}))
+        start = ws.receive_json()
+        assert start["type"] == "speech_start"
+        uid = start["data"]["utterance_id"]
+        ws.receive_json(), ws.receive_bytes()
+        assert ws.receive_json()["type"] == "speech_end"
+        ws.send_json(msg("speech_started", {"utterance_id": uid}))
+        ws.send_json(msg("speech_finished", {"utterance_id": uid, "interrupted": False, "played_ms": 1200}))
+        t.join(10)
+        assert result["ok"] and result["session_id"] == sid
+        assert [e["event"]["type"] for e in result["events"]] == ["arrived", "speech_finished"]
+
+
+def test_debug_run_needs_a_browser():
+    with TestClient(create_app()) as client:
+        assert client.post("/debug/run", json={"steps": [{"say": "hi"}]}).status_code == 404
+
+
+def test_debug_endpoints_are_off_by_default(monkeypatch):
+    monkeypatch.delenv("KAMARI_AVATAR_DEBUG", raising=False)
+    with TestClient(_create_app()) as client:
+        assert client.post("/debug/run", json={"steps": []}).status_code == 404
+    monkeypatch.setenv("KAMARI_AVATAR_DEBUG", "1")
+    with TestClient(_create_app()) as client:
+        assert client.post("/debug/run", json={"steps": [{"say": "hi"}]}).status_code == 404  # on, no browser
+
+
+def test_health_lists_every_component():
+    with TestClient(create_app()) as client:
+        comps = client.get("/health").json()["components"]
+    assert comps["chunker"] == "punctuation" and comps["tts"] == "fake" and comps["tool_providers"] == "none"
+
+
+def test_stale_socket_does_not_disconnect_a_resumed_session():
+    app = create_app()
+    with TestClient(app) as client, client.websocket_connect("/ws") as old:
+        old.send_json(HELLO)
+        ready = old.receive_json()["data"]
+        with client.websocket_connect("/ws") as new:
+            new.send_json(msg("resume", {"session_id": ready["session_id"], "resume_token": ready["resume_token"],
+                                         "last_seq_received": 1}))
+            assert new.receive_json()["type"] == "state_sync"
+            old.close()
+            new.send_json(msg("ping", {"t": 1}))
+            assert new.receive_json()["type"] == "pong"  # old socket's exit has been processed
+            assert [s.id for s in app.state.sessions.connected()] == [ready["session_id"]]
+
+
+def test_disconnect_ends_the_utterance_in_progress():
+    app = create_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as ws:
+            sid = ready(ws)
+            ws.send_json(msg("user_text", {"text": "say Hello there"}))
+            ws.receive_json()
+            uid = ws.receive_json()["data"]["utterance_id"]
+        director = app.state.hub.directors[sid]
+        result = client.portal.call(director.wait, uid, 5)
+        assert result["type"] == "speech_cancel" and result["reason"] == "disconnected"

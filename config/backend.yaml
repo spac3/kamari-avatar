@@ -10,8 +10,11 @@ llm:
   impl: fake
   options: { reply: "Sure, heading to the sofa now.", tool_call: { name: walk_to, arguments: { location: sofa } } }
 tts:
-  impl: fake
-  options: { sample_rate: 22050 }
+  # Piper with phoneme alignments (pip install -e "server[piper]", then download the voice; see README).
+  # Falls back to the fake tone voice until both are there; /health shows which one is running.
+  impl: piper
+  fallback: fake
+  options: { model: server/voices/en_US-ljspeech-medium.onnx }
 viseme_mapper:
   impl: oculus_ipa
 chunker:
@@ -35,3 +38,8 @@ tool_providers:
       timeout_s: 60
 session:
   resume_ttl_s: 600
+debug:
+  # /debug/run and /debug/command drive the avatar without a conversation, with no auth: anyone
+  # who can reach the backend could make it walk and talk. Off by default; for local development
+  # set KAMARI_AVATAR_DEBUG=1 when starting the backend instead of changing this.
+  endpoints: false
