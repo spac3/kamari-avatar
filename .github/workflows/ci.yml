@@ -17,19 +17,43 @@ jobs:
       - run: pytest -q
 
   speech:
-    name: piper speech
+    name: piper speech and whisper
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: server } }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install -e ".[dev,piper]"
+      - run: pip install -e ".[dev,piper,stt]"
       - uses: actions/cache@v4
         with: { path: server/voices, key: piper-en_US-ljspeech-medium }
+      - uses: actions/cache@v4
+        with: { path: ~/.cache/huggingface, key: whisper-base.en }
       - run: test -f voices/en_US-ljspeech-medium.onnx || python -m piper.download_voices en_US-ljspeech-medium --data-dir voices
-      - run: pytest -q tests/test_piper.py
-        env: { KAMARI_TEST_PIPER_VOICE: voices/en_US-ljspeech-medium.onnx }
+      - run: pytest -q tests/test_piper.py tests/test_whisper.py
+        env:
+          KAMARI_TEST_PIPER_VOICE: voices/en_US-ljspeech-medium.onnx
+          KAMARI_TEST_WHISPER_MODEL: base.en   # the default in config/backend.yaml; tiny.en mishears "wave"
+
+  local-llm:
+    name: conversation on a local model (ollama)
+    runs-on: ubuntu-latest
+    services:
+      ollama:
+        image: ollama/ollama:0.40.3
+        ports: ["11434:11434"]
+    defaults: { run: { working-directory: server } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -e ".[dev]"
+      - name: pull the model named in config/llm-ollama.yaml
+        run: |
+          model=$(python -c "from kamari_avatar.config import BackendConfig as C; print(C.load('config/llm-ollama.yaml').llm.options['model'])")
+          curl -sf http://localhost:11434/api/pull -d "{\"model\": \"$model\", \"stream\": false}"
+      - run: pytest -q -s tests/test_local_llm.py
+        env: { KAMARI_TEST_OLLAMA: "1" }
 
   web:
     runs-on: ubuntu-latest

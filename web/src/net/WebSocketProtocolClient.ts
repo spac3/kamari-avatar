@@ -50,6 +50,10 @@ export class WebSocketProtocolClient implements ProtocolClient {
     this.ws.send(JSON.stringify({ v: 1, type, id: `c_${++this.n}`, ts: Date.now(), data }));
   }
 
+  sendBinary(frame: ArrayBuffer): void {
+    if (this.ws?.readyState === 1) this.ws.send(frame);
+  }
+
   on<T extends ServerType>(type: T, cb: (msg: ServerMsg<T>) => void): () => void {
     const set = this.handlers.get(type) ?? new Set<Handler>();
     set.add(cb as Handler);
@@ -141,13 +145,25 @@ export function parseAudioFrame(buf: ArrayBuffer): AudioFrame | null {
   return { kind: view.getUint8(0), streamId: view.getUint32(1), seq: view.getUint32(5), pcm };
 }
 
+/** Builds a binary frame; the header is big-endian, the PCM16 payload little-endian like every browser. */
+export function encodeAudioFrame(kind: number, streamId: number, seq: number, pcm: Int16Array): ArrayBuffer {
+  const buf = new ArrayBuffer(9 + pcm.byteLength);
+  const view = new DataView(buf);
+  view.setUint8(0, kind);
+  view.setUint32(1, streamId);
+  view.setUint32(5, seq);
+  new Uint8Array(buf, 9).set(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)); // offset 9 is odd: copy bytes
+  return buf;
+}
+
 /** Fake: no server. Lets the scene run standalone (and in tests). */
 export class OfflineProtocolClient implements ProtocolClient {
   state: ConnectionState = 'offline';
   sessionId = null;
   connect(): void {}
   close(): void {}
-  send(): void {}
+  send<T extends ClientType>(_type: T, _data: ClientData<T>): void {}
+  sendBinary(_frame: ArrayBuffer): void {}
   on(): () => void {
     return () => {};
   }

@@ -415,6 +415,33 @@ class PongMessage(BaseModel):
     ]
 
 
+class TurnTimingData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    turn_id: str
+    stt_ms: int | None = None
+    llm_first_token_ms: int | None = None
+    first_sentence_ms: int | None = None
+    tts_first_audio_ms: int | None = None
+    first_audio_ms: int | None = None
+    total_ms: int | None = None
+
+
+class TurnTimingMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    v: Literal[1]
+    type: Literal['turn_timing']
+    id: str
+    ts: Annotated[int, Field(description='Unix ms')]
+    data: TurnTimingData
+    seq: Annotated[
+        int, Field(description='Monotonic per session, used by resume', ge=0)
+    ]
+
+
 class Capabilities(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -703,6 +730,10 @@ class PttData(BaseModel):
         extra='forbid',
     )
     state: Literal['down', 'up']
+    stream_id: Annotated[
+        int | None,
+        Field(description='stream_id of the mic audio frames for this press'),
+    ] = None
 
 
 class PttMessage(BaseModel):
@@ -817,6 +848,9 @@ class SpeechChunkData(BaseModel):
     duration_ms: int
     visemes: list[VisemeKey] | None = None
     words: list[WordKey] | None = None
+    text: Annotated[str | None, Field(description='The sentence this chunk speaks')] = (
+        None
+    )
     last: bool
 
 
@@ -851,6 +885,7 @@ class ServerMessage(
         | ErrorMessage
         | StateSyncMessage
         | PongMessage
+        | TurnTimingMessage
     ]
 ):
     root: Annotated[
@@ -868,7 +903,8 @@ class ServerMessage(
         | TranscriptMessage
         | ErrorMessage
         | StateSyncMessage
-        | PongMessage,
+        | PongMessage
+        | TurnTimingMessage,
         Field(title='ServerMessage'),
     ]
 

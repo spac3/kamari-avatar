@@ -58,6 +58,23 @@ describe('locomotion', () => {
   });
 });
 
+describe('facing', () => {
+  it('turns on the spot without reporting an arrival, and never interrupts a walk', () => {
+    const body = new THREE.Object3D();
+    const loco = new Locomotion(body, new StubAnim());
+    const arrived: string[] = [];
+    loco.onArrived = (c) => arrived.push(c.cmdId);
+    loco.face(180);
+    for (let i = 0; i < 60; i++) loco.update(1 / 60);
+    expect(Math.abs(angleDelta(body.rotation.y, Math.PI))).toBeLessThan(0.03);
+    expect(loco.state).toBe('idle');
+    expect(arrived).toEqual([]);
+    loco.start({ cmdId: 'w', path: [{ x: 0, z: 0 }, { x: 0, z: -2 }], location: null, faceDeg: null, speed: 'walk' });
+    loco.face(0);
+    expect(loco.cmd?.cmdId).toBe('w');
+  });
+});
+
 describe('lip sync', () => {
   it('follows the audio clock and blends into the next viseme', () => {
     const ls = new TimelineLipSync({ blendS: 0.05, gain: 1 });
@@ -136,6 +153,23 @@ describe('speech player', () => {
     sp.interrupt();
     expect(audio.stopped).toBe(1);
     expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u2', interrupted: true, played_ms: 400 }]);
+  });
+
+  it('does not count the wait for the next sentence as heard audio', () => {
+    const audio = new FakeAudio();
+    const sent: [string, unknown][] = [];
+    const sp = new SpeechPlayer(audio, new TimelineLipSync(), (t, d) => sent.push([t, d]));
+    const chunk = (stream_id: number) =>
+      ({ type: 'speech_chunk', data: { utterance_id: 'u4', stream_id, seq: stream_id, sample_rate: 1000, duration_ms: 1000, last: false } }) as never;
+    sp.onStart({ type: 'speech_start', data: { utterance_id: 'u4', text: 'One.' } } as never);
+    sp.onChunk(chunk(1));
+    sp.onAudio(frame(1, 0, 1000)); // 0.05 to 1.05
+    (audio.context as { currentTime: number }).currentTime = 5; // the next sentence took a while
+    sp.onChunk(chunk(2));
+    sp.onAudio(frame(2, 1, 1000)); // 5.05 to 6.05
+    (audio.context as { currentTime: number }).currentTime = 5.25;
+    sp.interrupt();
+    expect(sent.at(-1)).toEqual(['speech_finished', { utterance_id: 'u4', interrupted: true, played_ms: 1200 }]);
   });
 
   it('never reports negative playback when interrupted before the audio starts', () => {

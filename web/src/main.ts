@@ -5,7 +5,9 @@ import { configFromQuery, registerBuiltins } from './config';
 import type {
   AnimationLibrary,
   AvatarAdapter,
+  GesturePlayer,
   LipSyncDriver,
+  MicCapture,
   NavigationProvider,
   ProtocolClient,
   QualitySettings,
@@ -15,6 +17,7 @@ import type {
 } from './interfaces';
 import { BrowserLifecycle } from './lifecycle/BrowserLifecycle';
 import { Locomotion, pathLength, type LocoState, type WalkCommand } from './loco/Locomotion';
+import { PushToTalk } from './mic/PushToTalk';
 import { WebSocketProtocolClient } from './net/WebSocketProtocolClient';
 import { AdaptiveQuality, detectDevice, presetFor } from './quality/QualityProfile';
 import { create } from './registry';
@@ -81,7 +84,7 @@ function resize(): void {
 
 // ---------------------------------------------------------------- HUD
 const $ = (id: string) => document.getElementById(id)!;
-const hud = { fps: $('fps'), conn: $('conn'), quality: $('quality'), status: $('status') };
+const hud = { fps: $('fps'), conn: $('conn'), quality: $('quality'), status: $('status'), latency: $('latency'), you: $('you'), kamari: $('kamari') };
 
 // ---------------------------------------------------------------- components
 const room = create<RoomProvider>('room', cfg.room);
@@ -92,6 +95,8 @@ const animUrl = cfg.animation.options?.url as string | undefined;
 let anim = create<AnimationLibrary>('animation', { ...cfg.animation, options: { ...cfg.animation.options, avatar, url: animUrl && `${base}${animUrl}` } });
 const nav = create<NavigationProvider>('navigation', cfg.navigation);
 const lipSync = create<LipSyncDriver>('lipsync', cfg.lipSync);
+const gestures = create<GesturePlayer>('gestures', { ...cfg.gestures, options: { ...cfg.gestures.options, avatar } });
+const mic = create<MicCapture>('mic', cfg.mic);
 
 const player = new WebAudioPlayer();
 const lifecycle = new BrowserLifecycle();
@@ -196,27 +201,55 @@ function sendState(): void {
   });
 }
 
-// ---------------------------------------------------------------- speech
-const speech = new SpeechPlayer(player, lipSync, (type, data) => net.send(type, data));
+// ---------------------------------------------------------------- gestures and looking
+function locationPoint(name: string): THREE.Vector3 | null {
+  const loc = manifest.locations.find((l) => l.name === name);
+  return loc ? new THREE.Vector3(loc.position.x, 1.3, loc.position.z) : null;
+}
 
-/** Debug commands go through the backend, like the LLM's will; offline they run locally. */
+let lookTimer: ReturnType<typeof setTimeout> | null = null;
+function lookAt(data: ServerMsg<'look_at'>['data']): void {
+  const target = data.target.location ? locationPoint(data.target.location) : data.target.point ? new THREE.Vector3(data.target.point.x, 1.3, data.target.point.z) : camera.position;
+  gestures.lookAt(target);
+  if (lookTimer) clearTimeout(lookTimer);
+  lookTimer = setTimeout(() => gestures.lookAt(null), 4000); // then back to facing ahead
+  net.send('ack', { cmd_id: data.cmd_id });
+}
+
+function gesture(data: ServerMsg<'gesture'>['data']): void {
+  // Gestures are for the user: turn to face them first when standing (a wave at the window would face away).
+  if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
+  const ok = gestures.play(data.name, (completed) =>
+    completed
+      ? net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name })
+      : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'replaced' }),
+  );
+  if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: `unknown gesture ${data.name}` });
+}
+
+// ---------------------------------------------------------------- speech and conversation
+const speech = new SpeechPlayer(player, lipSync, (type, data) => net.send(type, data));
+const ptt = new PushToTalk(mic, net, () => speech.interrupt(), () => player.context, { tailMs: cfg.mic.options?.tailMs as number | undefined });
+
+/** Typed text goes to the LLM; "/go to sofa", "/say hi" and "/gesture wave" drive the avatar directly. Offline, only walking works. */
 function command(text: string): void {
   if (net.state === 'open') {
     net.send('user_text', { text });
     return;
   }
-  const m = /^(?:go|walk) to (.+)$/i.exec(text);
+  const m = /^\/?(?:go|walk) to (.+)$/i.exec(text);
   const loc = m && manifest.locations.find((l) => l.name === m[1] || l.label.toLowerCase() === m[1].toLowerCase());
   if (loc) walk({ cmd_id: `local_${++localCmds}`, target: { location: loc.name } });
   else hud.status.textContent = 'Offline: only "go to <place>" works without the server';
 }
 
 function buildDebugPanel(): void {
+  document.body.classList.toggle('compact', device.coarsePointer && !cfg.debug);
   const panel = $('locations');
   for (const loc of manifest.locations) {
     const b = document.createElement('button');
     b.textContent = loc.label;
-    b.onclick = () => command(`go to ${loc.name}`);
+    b.onclick = () => command(`/go to ${loc.name}`);
     panel.appendChild(b);
   }
   const form = $('say') as HTMLFormElement;
@@ -224,9 +257,10 @@ function buildDebugPanel(): void {
   form.onsubmit = (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    if (text) command(/^(go|walk|move) /i.test(text) ? text : `say ${text}`);
+    if (text) command(text);
     input.value = '';
   };
+  buildTalkButton();
   const navBtn = $('toggle-nav') as HTMLButtonElement;
   navBtn.onclick = () => {
     const mesh = scene.getObjectByName('navmesh-debug');
@@ -234,6 +268,31 @@ function buildDebugPanel(): void {
     markers.visible = !markers.visible;
     pathLine.visible = markers.visible;
   };
+}
+
+function buildTalkButton(): void {
+  const btn = $('talk') as HTMLButtonElement;
+  const label = btn.querySelector('span')!;
+  ptt.onState = (st) => {
+    btn.dataset.state = st;
+    label.textContent = { idle: 'Hold to talk', opening: 'Allow the microphone…', talking: 'Listening… release to send', sending: 'Sending…' }[st];
+    if (st === 'talking') hud.you.textContent = '…';
+  };
+  ptt.onError = (e) => (hud.status.textContent = `Microphone: ${e instanceof Error ? e.message : String(e)}`);
+  btn.addEventListener('pointerdown', (e) => {
+    btn.setPointerCapture(e.pointerId);
+    void ptt.down();
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, () => void ptt.up());
+  btn.addEventListener('contextmenu', (e) => e.preventDefault()); // long press on phones
+  // Desktop: hold the space bar, unless typing in the text box.
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && started) {
+      e.preventDefault();
+      void ptt.down();
+    }
+  });
+  addEventListener('keyup', (e) => e.code === 'Space' && void ptt.up());
 }
 
 // ---------------------------------------------------------------- start
@@ -265,6 +324,7 @@ async function start(): Promise<void> {
   }
   avatar.lookAt(camera.position);
 
+  hud.conn.textContent = net.state; // the tap may have connected while assets were loading
   net.onState((s) => (hud.conn.textContent = s));
   net.on('walk_to', (m) => walk(m.data));
   net.on('stop_moving', (m) => {
@@ -273,7 +333,18 @@ async function start(): Promise<void> {
     net.send('ack', { cmd_id: m.data.cmd_id });
   });
   net.on('speech_start', (m) => speech.onStart(m));
-  net.on('speech_chunk', (m) => speech.onChunk(m));
+  net.on('speech_chunk', (m) => {
+    speech.onChunk(m);
+    if (m.data.text && m.data.seq === 0) hud.kamari.textContent = m.data.text;
+    else if (m.data.text && !hud.kamari.textContent?.endsWith(m.data.text)) hud.kamari.textContent += ` ${m.data.text}`;
+  });
+  net.on('gesture', (m) => gesture(m.data));
+  net.on('look_at', (m) => lookAt(m.data));
+  net.on('transcript', (m) => (hud.you.textContent = m.data.text || '(nothing heard)'));
+  net.on('turn_timing', (m) => {
+    const ms = m.data.first_audio_ms ?? m.data.tts_first_audio_ms;
+    if (ms !== undefined) hud.latency.textContent = `${(ms / 1000).toFixed(2)} s`;
+  });
   net.on('speech_end', (m) => speech.onEnd(m));
   net.on('speech_cancel', (m) => speech.onCancel(m));
   net.onBinary((f) => speech.onAudio(f));
@@ -285,7 +356,10 @@ async function start(): Promise<void> {
     }
   });
   net.on('error', (m) => (hud.status.textContent = `Server: ${m.data.message}`));
-  lifecycle.onHidden(() => net.send('visibility', { state: 'hidden' }));
+  lifecycle.onHidden(() => {
+    ptt.cancel();
+    net.send('visibility', { state: 'hidden' });
+  });
   lifecycle.onVisible(() => {
     if (net instanceof WebSocketProtocolClient) net.wake();
     net.send('visibility', { state: 'visible' });
@@ -341,6 +415,7 @@ function loop(time?: number): void {
   anim.play(loco.moving ? (loco.cmd?.speed === 'run' ? 'run' : 'walk') : speech.talking ? 'talk' : 'idle', { fadeS: 0.3 });
   if (!loco.moving) anim.setTimeScale(1);
   anim.update(step);
+  gestures.update(step);
   lipSync.update(player.context?.currentTime ?? 0, avatar);
   avatar.lookAt(camera.position);
   avatar.update(step);

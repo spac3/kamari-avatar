@@ -417,6 +417,10 @@
             "$ref": "#/$defs/WordKey"
           }
         },
+        "text": {
+          "type": "string",
+          "description": "The sentence this chunk speaks"
+        },
         "last": {
           "type": "boolean"
         }
@@ -1048,6 +1052,75 @@
         "seq"
       ],
       "title": "PongMessage"
+    },
+    "TurnTimingData": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "turn_id": {
+          "type": "string"
+        },
+        "stt_ms": {
+          "type": "integer"
+        },
+        "llm_first_token_ms": {
+          "type": "integer"
+        },
+        "first_sentence_ms": {
+          "type": "integer"
+        },
+        "tts_first_audio_ms": {
+          "type": "integer"
+        },
+        "first_audio_ms": {
+          "type": "integer"
+        },
+        "total_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "turn_id"
+      ],
+      "description": "Latency of one conversational turn, each stage in ms from the end of the user's speech"
+    },
+    "TurnTimingMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v": {
+          "const": 1,
+          "type": "integer"
+        },
+        "type": {
+          "const": "turn_timing",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "integer",
+          "description": "Unix ms"
+        },
+        "data": {
+          "$ref": "#/$defs/TurnTimingData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per session, used by resume"
+        }
+      },
+      "required": [
+        "v",
+        "type",
+        "id",
+        "ts",
+        "data",
+        "seq"
+      ],
+      "title": "TurnTimingMessage"
     },
     "HelloData": {
       "type": "object",
@@ -1789,6 +1862,10 @@
             "down",
             "up"
           ]
+        },
+        "stream_id": {
+          "type": "integer",
+          "description": "stream_id of the mic audio frames for this press"
         }
       },
       "required": [
@@ -1986,6 +2063,9 @@
         },
         {
           "$ref": "#/$defs/PongMessage"
+        },
+        {
+          "$ref": "#/$defs/TurnTimingMessage"
         }
       ]
     },
