@@ -275,7 +275,9 @@ function gesture(data: ServerMsg<'gesture'>['data']): void {
 // ---------------------------------------------------------------- touching the screen
 // Both sides of the glass can touch it: the person with a pointer, the avatar with a fingertip.
 // Each touch draws ripples and reaches glass.onTouch, where touches will make things happen.
-let lastUserTouch: { point: THREE.Vector3; at: number } | null = null;
+// Screen positions, not world points: the glass moves with the avatar and the camera.
+let lastUserTouch: { x: number; y: number; at: number } | null = null;
+let pendingTap: { at: { x: number; y: number } | null; onDone?: (completed: boolean) => void } | null = null;
 let glanceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function glanceAt(point: THREE.Vector3, ms: number): void {
@@ -294,22 +296,42 @@ function somewhereInReach(): THREE.Vector3 | null {
   return glass.onGlass(p);
 }
 
-/** The avatar taps the glass: at a screen position, back where the person just touched, or somewhere in reach. */
+/**
+ * The avatar taps the glass: at a screen position, back where the person just touched, or somewhere
+ * in reach. Turns to face the screen first and plans the reach once facing it. False if walking.
+ */
 function avatarTap(at: { x: number; y: number } | null, onDone?: (completed: boolean) => void): boolean {
   if (loco.moving) return false;
-  if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
-  const recent = lastUserTouch && performance.now() - lastUserTouch.at < 10_000 ? lastUserTouch.point : null;
-  const target = at ? glass.pointAt(at.x, at.y) : (recent ?? somewhereInReach());
-  if (!target) return false;
-  const pressed = tapper.tap(target, glass.normal, (p) => glass.touch('avatar', p), onDone);
-  if (pressed) glanceAt(pressed, 1800);
-  return pressed !== null;
+  pendingTap?.onDone?.(false);
+  pendingTap = { at, onDone };
+  const facing = (Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI;
+  const off = Math.abs(((facing - loco.headingDeg + 540) % 360) - 180);
+  if (!loco.cmd && off > 5) loco.face(facing);
+  if (!loco.cmd) return startPendingTap();
+  return true;
+}
+
+/** Plan and start the waiting tap, once the avatar stands still facing the screen. */
+function startPendingTap(): boolean {
+  const p = pendingTap;
+  if (!p) return false;
+  pendingTap = null;
+  const recent = lastUserTouch && performance.now() - lastUserTouch.at < 10_000 ? lastUserTouch : null;
+  const spot = p.at ?? recent;
+  const target = spot ? glass.pointAt(spot.x, spot.y) : somewhereInReach();
+  const pressed = target && tapper.tap(target, glass.normal, (pt) => glass.touch('avatar', pt), p.onDone);
+  if (!pressed) {
+    p.onDone?.(false);
+    return false;
+  }
+  glanceAt(pressed, 1800);
+  return true;
 }
 
 glass.onTouch((t: ScreenTouch) => {
   hud.status.textContent = `${t.source === 'user' ? 'You' : 'Kamari'} touched the screen at ${Math.round(t.x * 100)}%, ${Math.round(t.y * 100)}%`;
   if (t.source === 'user') {
-    lastUserTouch = { point: t.point, at: performance.now() };
+    lastUserTouch = { x: t.x, y: t.y, at: performance.now() };
     glanceAt(t.point, 1500);
   }
 });
@@ -339,10 +361,12 @@ const ptt = new PushToTalk(mic, net, () => speech.interrupt(), () => player.cont
 
 /** Typed text goes to the LLM; "/go to sofa", "/say hi" and "/gesture wave" drive the avatar directly. Offline, only walking works. */
 function command(text: string): void {
-  const tap = /^\/tap(?:\s+([\d.]+)\s+([\d.]+))?$/i.exec(text);
+  const tap = /^\/tap(?:\s+(\S+)\s+(\S+))?$/i.exec(text);
   if (tap) {
     // "/tap" or "/tap 0.3 0.6" (screen position, 0..1 from the top left): works offline too.
-    if (!avatarTap(tap[1] ? { x: Number(tap[1]), y: Number(tap[2]) } : null)) hud.status.textContent = "Can't tap right now";
+    const at = tap[1] ? { x: Number(tap[1]), y: Number(tap[2]) } : null;
+    if (at && ![at.x, at.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) hud.status.textContent = 'Usage: /tap, or /tap x y with x and y between 0 and 1';
+    else if (!avatarTap(at)) hud.status.textContent = "Can't tap right now";
     return;
   }
   if (net.state === 'open') {
@@ -528,6 +552,10 @@ function loop(time?: number): void {
   acc = 0;
 
   loco.update(step);
+  if (pendingTap && loco.moving) {
+    pendingTap.onDone?.(false); // a walk took over before the turn to the screen finished
+    pendingTap = null;
+  } else if (pendingTap && !loco.cmd) startPendingTap();
   speech.update();
   anim.play(loco.moving ? (loco.cmd?.speed === 'run' ? 'run' : 'walk') : speech.talking ? 'talk' : 'idle', { fadeS: 0.3 });
   if (!loco.moving) anim.setTimeScale(1);
