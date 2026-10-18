@@ -72,6 +72,9 @@ class TurnTiming:
         return {"turn_id": self.turn_id} | {f"{k}_ms": v for k, v in self.marks.items()}
 
 
+HEARD_MS = 20
+
+
 @dataclass
 class _Utterance:
     id: str
@@ -82,8 +85,12 @@ class _Utterance:
     turn: _Turn | None = None
 
     def heard(self, played_ms: int) -> int:
-        """How many sentences had started playing."""
-        return sum(1 for start, _ in self.spoken if start < played_ms)
+        """How many sentences had started playing.
+
+        Starts are sums of whole-millisecond chunk lengths while the browser reports the exact time
+        played, so a sentence must have played for a moment (HEARD_MS) before it counts as heard.
+        """
+        return sum(1 for start, _ in self.spoken if start < played_ms - HEARD_MS)
 
 
 @dataclass
@@ -201,12 +208,14 @@ class Director:
                     visemes: list[VisemeKey] = []
                     if chunk.phonemes and chunk.phoneme_ms:
                         visemes = self.comps.visemes.map(chunk.phonemes, chunk.phoneme_ms)
+                    # Local: another utterance may take the next id while this one awaits the send.
                     self._stream_ids += 1
-                    header = SpeechChunkData(utterance_id=u.id, stream_id=self._stream_ids, seq=n,
+                    stream_id = self._stream_ids
+                    header = SpeechChunkData(utterance_id=u.id, stream_id=stream_id, seq=n,
                                              sample_rate=chunk.sample_rate, duration_ms=chunk.duration_ms,
                                              visemes=visemes, text=sentence, last=False)
                     await self.out.send_json("speech_chunk", header.model_dump(mode="json", exclude_none=True))
-                    await self.out.send_bytes(audio_frame(self._stream_ids, n, chunk.pcm))
+                    await self.out.send_bytes(audio_frame(stream_id, n, chunk.pcm))
                     if u.turn:
                         u.turn.timing.mark("tts_first_audio")
                     u.ms += chunk.duration_ms
@@ -340,8 +349,14 @@ class Director:
             log.exception("turn %s failed", turn.id)
             code = "stt_failed" if audio is not None and not turn.transcript else "llm_failed"
             turn.error = f"{code}: {str(e) or type(e).__name__}"
-            await self.out.send_json("error", {"code": code, "ref": turn.id, "message": str(e) or type(e).__name__})
+            for call in turn.unanswered:  # as above: an unanswered tool call would break every later turn
+                store.append(sid, ChatMessage("tool", json.dumps({"status": "failed"}), tool_call_id=call.id))
+            turn.unanswered.clear()
             self.session.speech = "silent"
+            try:
+                await self.out.send_json("error", {"code": code, "ref": turn.id, "message": str(e) or type(e).__name__})
+            except Exception:  # noqa: BLE001 - the socket that failed the turn may fail this too
+                log.warning("could not report failed turn %s", turn.id)
         finally:
             turn.pending_text = None
             if turn.utterance:

@@ -183,7 +183,7 @@ async def test_interrupting_trims_every_round_of_the_turn():
     u = turn.utterance
     assert [text for _, text in u.spoken] == ["Sure, heading out right now.", "Sorry, I cannot go there today.",
                                               "Maybe the sofa would do instead?"]
-    await d.on_speech_finished(u.id, interrupted=True, played_ms=u.spoken[1][0] + 1)
+    await d.on_speech_finished(u.id, interrupted=True, played_ms=u.spoken[1][0] + 100)
     replies = [m.content for m in d.comps.store.history("s_test") if m.role == "assistant"]
     assert replies == ["Sure, heading out right now.", "Sorry, I cannot go there today. [interrupted]"]
 
@@ -287,3 +287,28 @@ async def test_engine_failures_are_reported(failing):
     await d.wait_turn(await d.ptt_up(), 5)
     err = browser.of("error")
     assert err and err[0]["code"] == f"{failing}_failed"
+
+
+async def test_a_turn_that_fails_mid_tool_call_still_answers_it():
+    class Dying(Browser):
+        async def send_json(self, type_, data):
+            if type_ == "stop_moving":
+                raise RuntimeError("socket gone")
+            await super().send_json(type_, data)
+
+    llm = ScriptedLLM([ToolCall("c1", "stop_moving", {}), Done("tool_calls")])
+    d, _ = make(llm, Dying())
+    await run(d, "stop")
+    history = d.comps.store.history("s_test")
+    calls = {c.id for m in history for c in m.tool_calls}
+    answered = {m.tool_call_id for m in history if m.role == "tool"}
+    assert calls == {"c1"} and answered == calls  # or the next request to the LLM is rejected
+
+
+def test_a_sentence_counts_as_heard_only_once_it_has_played():
+    from kamari_avatar.director import _Utterance
+
+    u = _Utterance("u")
+    u.spoken = [(0, "One."), (1360, "Two.")]  # 1360.54 ms of audio, floored per chunk
+    assert u.heard(1361) == 1  # the browser's exact time, rounded: sentence two never played
+    assert u.heard(1500) == 2

@@ -54,6 +54,7 @@ tool_providers:
       timeout_s: 60
 session:
   resume_ttl_s: 600
+  # allowed_origins: ["https://kamari.example"]   # pages besides the backend's own host that may connect
 director:
   max_tool_rounds: 3     # extra LLM calls to answer from Kamari tool results
   history_messages: 40

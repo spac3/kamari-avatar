@@ -40,6 +40,10 @@ class ComponentSpec(BaseModel):
 
 class SessionSettings(BaseModel):
     resume_ttl_s: int = 600
+    # Web pages that may open the WebSocket besides the backend's own host (a page served through the
+    # Vite proxy counts as the same host). Other pages are refused, so a site you visit cannot talk to
+    # Kamari. "*" allows any page.
+    allowed_origins: list[str] = []
 
 
 DEFAULT_PERSONA = """\

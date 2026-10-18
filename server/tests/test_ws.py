@@ -234,3 +234,16 @@ def test_debug_run_asks_a_whole_turn():
         ev = result["events"][0]["event"]
         assert result["ok"] and ev["type"] == "turn_done" and ev["actions"] == ["walk_to(sofa)"]
         assert ev["speech"]["type"] == "speech_finished" and "first_audio_ms" in ev["timing"]
+
+
+def test_pages_from_other_sites_cannot_connect():
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    with TestClient(create_app()) as client:
+        with pytest.raises(WebSocketDisconnect), client.websocket_connect("/ws", headers={"origin": "https://evil.example"}) as ws:
+            ws.receive_json()
+        # the app's own page, served by the backend or through the dev proxy (same Host)
+        with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+            ws.send_json(HELLO)
+            assert ws.receive_json()["type"] == "session_ready"

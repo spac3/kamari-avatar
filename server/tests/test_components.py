@@ -178,3 +178,16 @@ def test_shipped_ollama_config_switches_only_the_llm():
     base, ollama = BackendConfig.load(), BackendConfig.load("config/llm-ollama.yaml")
     assert ollama.llm.options["base_url"].startswith("http://localhost:11434")
     assert ollama.model_dump(exclude={"llm"}) == base.model_dump(exclude={"llm"})
+
+
+def test_stored_history_is_capped_at_a_user_message():
+    from kamari_avatar.impl.stores import MemoryConversationStore
+
+    store = MemoryConversationStore(max_messages=5)
+    for i in range(4):
+        store.append("s", ChatMessage("user", f"q{i}"))
+        store.append("s", ChatMessage("assistant", f"a{i}"))
+    roles = [m.role for m in store.history("s")]
+    assert len(roles) <= 5 and roles[0] == "user"
+    store.clear("s")
+    assert store.history("s") == []
