@@ -10,6 +10,12 @@ AVATAR = "avatar"
 USER = "user"
 
 
+def panel(room: RoomRegistry) -> dict[str, Any] | None:
+    """The room's translucent panel on the glass, if it has one: location, radius_m and controls."""
+    p = room.manifest().get("panel")
+    return p if p and p.get("controls") else None
+
+
 def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
     locs = room.locations()
     names = [loc.name for loc in locs]
@@ -21,7 +27,7 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
         return {"type": "object", "additionalProperties": False, "required": [prop],
                 "properties": {prop: {"type": "string", "enum": enum, "description": description}}}
 
-    return [
+    tools = [
         ToolSpec("walk_to", "Walk to a place in the room. Returns at once: you can keep talking while you walk.",
                  one("location", names, f"Where to go: {places}"), AVATAR),
         ToolSpec("gesture", "Play a body gesture. If you also asked to walk in this reply, it plays on arrival.",
@@ -31,6 +37,15 @@ def avatar_tools(room: RoomRegistry) -> list[ToolSpec]:
         ToolSpec("stop_moving", "Stop walking right away.",
                  {"type": "object", "additionalProperties": False, "properties": {}}, AVATAR),
     ]
+    if p := panel(room):
+        controls = ", ".join(f"{c['id']} ({c['label']}{', on/off' if c.get('kind') == 'toggle' else ''})"
+                             for c in p["controls"])
+        tools.append(ToolSpec(
+            "press_control",
+            f"Reach out and press a control on the translucent panel on the glass. The panel only shows while "
+            f"you stand at the {p['location']}; if you are elsewhere, walk_to {p['location']} first in the same reply.",
+            one("control", [c["id"] for c in p["controls"]], f"Which control: {controls}"), AVATAR))
+    return tools
 
 
 def normalize(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:

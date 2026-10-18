@@ -11,6 +11,20 @@ export interface Obstacle {
 
 export interface NamedLocation { name: string; label: string; position: Vec2; heading_deg: number }
 
+export interface PanelControl {
+  id: string;
+  label: string;
+  /** `toggle` keeps an on/off state; a `button` (the default) just presses. */
+  kind?: 'button' | 'toggle';
+  /** Starting state of a toggle. */
+  on?: boolean;
+  /** What pressing it does in the browser, e.g. `lights` or `gesture:wave`. */
+  action?: string;
+}
+
+/** The translucent panel on the glass: shown while the avatar stands near `location`. */
+export interface PanelSpec { location: string; radius_m: number; controls: PanelControl[] }
+
 export interface RoomManifest {
   room_id: string;
   manifest_version: string;
@@ -19,6 +33,7 @@ export interface RoomManifest {
   spawn: { position: Vec2; heading_deg: number };
   locations: NamedLocation[];
   obstacles: Obstacle[];
+  panel?: PanelSpec;
   gestures: string[];
   avatar: { id: string; url: string };
 }

@@ -18,6 +18,15 @@
     { "name": "coffee_table", "kind": "table", "center": { "x": -1.4, "z": -1.5 }, "size": { "x": 0.6, "y": 0.4, "z": 1.0 }, "color": "#8d6e4f" },
     { "name": "plant", "kind": "plant", "center": { "x": 1.4, "z": -2.6 }, "size": { "x": 0.5, "y": 1.2, "z": 0.5 }, "color": "#4f8a5b" }
   ],
+  "panel": {
+    "location": "centre",
+    "radius_m": 0.6,
+    "controls": [
+      { "id": "lights", "label": "Lights", "kind": "toggle", "on": true, "action": "lights" },
+      { "id": "wave", "label": "Wave", "action": "gesture:wave" },
+      { "id": "nod", "label": "Nod", "action": "gesture:nod" }
+    ]
+  },
   "gestures": ["wave", "nod", "shrug", "point", "tap"],
   "avatar": { "id": "cool-alien", "url": "avatars/cool-alien.vrm" }
 }

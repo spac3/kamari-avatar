@@ -39,6 +39,7 @@ class Browser:
         self.sent = []
         self.director = None
         self.auto = auto
+        self.panel_shown = True
 
     async def send_json(self, type_, data):
         self.sent.append((type_, data))
@@ -50,6 +51,13 @@ class Browser:
             loop.call_later(0.05, d.resolve, data["cmd_id"], {"type": "arrived", "location": data["target"]["location"]})
         elif type_ == "gesture":
             d.resolve(data["cmd_id"], {"type": "gesture_finished"})
+        elif type_ == "press_control":
+            if self.panel_shown:
+                d.resolve(data["cmd_id"], {"type": "control_pressed", "control": data["control"], "source": "avatar",
+                                           "on": False} if data["control"] == "lights" else
+                          {"type": "control_pressed", "control": data["control"], "source": "avatar"})
+            else:
+                d.resolve(data["cmd_id"], {"type": "command_cancelled", "reason": "panel_hidden"})
         elif type_ == "speech_end":
             d.on_speech_started(data["utterance_id"])
             d.resolve(data["utterance_id"], {"type": "speech_finished", "interrupted": False})
@@ -94,7 +102,7 @@ async def test_speaks_sentences_as_they_stream_and_walks_then_waves():
     assert [c["text"] for c in chunks] == ["Sure, I'll head to the window.", "Then I'll wave."]
     assert len(llm.calls) == 1  # avatar tools need no second LLM round
     tools = llm.calls[0]["tools"]
-    assert tools == ["walk_to", "gesture", "look_at", "stop_moving"]
+    assert tools == ["walk_to", "gesture", "look_at", "stop_moving", "press_control"]
     # history stays valid for the next request: every tool call has a result
     history = d.comps.store.history("s_test")
     assert [m.role for m in history] == ["user", "assistant", "tool", "tool"]
@@ -312,3 +320,41 @@ def test_a_sentence_counts_as_heard_only_once_it_has_played():
     u.spoken = [(0, "One."), (1360, "Two.")]  # 1360.54 ms of audio, floored per chunk
     assert u.heard(1361) == 1  # the browser's exact time, rounded: sentence two never played
     assert u.heard(1500) == 2
+
+
+async def test_presses_a_panel_control_and_hears_the_result_next_turn():
+    llm = ScriptedLLM([TextDelta("Lights off."), ToolCall("c1", "press_control", {"control": "Lights"}), Done("tool_calls")],
+                      [TextDelta("Done."), Done()])
+    d, browser = make(llm)
+    d.session.avatar = d.session.avatar.model_copy(update={"location": "centre"})
+    result = await run(d, "turn the lights off")
+    assert result["actions"] == ["press_control(lights)"]
+    await asyncio.sleep(0.05)
+    assert browser.of("press_control")[0]["control"] == "lights"
+    await run(d, "did it work?")
+    system = llm.calls[1]["messages"][0].content
+    assert "You pressed Lights on the panel; it is now off." in system
+    assert "translucent panel" in system and "It is showing now." in system
+
+
+async def test_a_press_with_the_panel_hidden_is_reported():
+    llm = ScriptedLLM([ToolCall("c1", "press_control", {"control": "wave"}), Done("tool_calls")], [TextDelta("Hm."), Done()])
+    d, browser = make(llm)
+    browser.panel_shown = False
+    await run(d, "press wave")
+    await asyncio.sleep(0.05)
+    await run(d, "well?")
+    system = llm.calls[-1]["messages"][0].content
+    assert "You could not press Wave on the panel (the panel was not showing)." in system
+    assert "It is hidden now: you are not at the centre." in system
+
+
+async def test_the_user_pressing_a_control_is_told_to_the_llm():
+    llm = ScriptedLLM([TextDelta("I saw."), Done()])
+    d, _ = make(llm)
+    d.on_control_pressed("lights", "user", True)
+    d.on_control_pressed("nod", "avatar", None)  # its own presses come back as tool results instead
+    await run(d, "see that?")
+    system = llm.calls[0]["messages"][0].content
+    assert "The user pressed Lights on the panel (now on)." in system
+    assert "Nod on the panel" not in system

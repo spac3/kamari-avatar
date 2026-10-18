@@ -280,6 +280,30 @@ class LookAtMessage(BaseModel):
     ]
 
 
+class PressControlData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    cmd_id: str
+    control: Annotated[
+        str, Field(description="id of a control on the room's glass panel")
+    ]
+
+
+class PressControlMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    v: Literal[1]
+    type: Literal['press_control']
+    id: str
+    ts: Annotated[int, Field(description='Unix ms')]
+    data: PressControlData
+    seq: Annotated[
+        int, Field(description='Monotonic per session, used by resume', ge=0)
+    ]
+
+
 class SetExpressionData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -685,6 +709,30 @@ class GestureFinishedMessage(BaseModel):
     data: GestureFinishedData
 
 
+class ControlPressedData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    control: str
+    source: Literal['user', 'avatar']
+    on: bool | None = None
+    cmd_id: Annotated[
+        str | None,
+        Field(description='the press_control this press carried out, if any'),
+    ] = None
+
+
+class ControlPressedMessage(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    v: Literal[1]
+    type: Literal['control_pressed']
+    id: str
+    ts: Annotated[int, Field(description='Unix ms')]
+    data: ControlPressedData
+
+
 class UserSpeechStartData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -807,6 +855,7 @@ class ClientMessage(
         | SpeechStartedMessage
         | SpeechFinishedMessage
         | GestureFinishedMessage
+        | ControlPressedMessage
         | UserSpeechStartMessage
         | UserSpeechEndMessage
         | PttMessage
@@ -827,6 +876,7 @@ class ClientMessage(
         | SpeechStartedMessage
         | SpeechFinishedMessage
         | GestureFinishedMessage
+        | ControlPressedMessage
         | UserSpeechStartMessage
         | UserSpeechEndMessage
         | PttMessage
@@ -886,6 +936,7 @@ class ServerMessage(
         | SpeechCancelMessage
         | GestureMessage
         | LookAtMessage
+        | PressControlMessage
         | SetExpressionMessage
         | ListeningMessage
         | TranscriptMessage
@@ -905,6 +956,7 @@ class ServerMessage(
         | SpeechCancelMessage
         | GestureMessage
         | LookAtMessage
+        | PressControlMessage
         | SetExpressionMessage
         | ListeningMessage
         | TranscriptMessage

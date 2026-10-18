@@ -6,6 +6,7 @@ import type {
   AnimationLibrary,
   AvatarAdapter,
   GesturePlayer,
+  GlassUi,
   LipSyncDriver,
   MicCapture,
   NavigationProvider,
@@ -58,6 +59,7 @@ controls.enabled = cfg.debug;
 
 const hemi = new THREE.HemisphereLight(0xffffff, 0xb9a88f, 1.6);
 const sun = new THREE.DirectionalLight(0xfff2dd, 1.8);
+const lightLevels = { hemi: hemi.intensity, sun: sun.intensity };
 sun.position.set(-2, 5, 3);
 sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5 });
@@ -89,6 +91,7 @@ function resize(): void {
 // the bottom (so the screen cuts it at the waist), and it is close enough to reach the glass.
 // Measured from the avatar once loaded, and again on resize.
 let framed = false;
+let panelHeight = 1;
 function frame(): void {
   const body = avatar.object;
   body.updateWorldMatrix(true, true);
@@ -110,6 +113,9 @@ function frame(): void {
   const fwd = framed
     ? camera.position.clone().sub(controls.target).setY(0).normalize()
     : new THREE.Vector3(Math.sin(body.rotation.y), 0, Math.cos(body.rotation.y));
+  // The panel on the glass sits a little below the chest: in easy reach, under the face.
+  panelHeight = (avatar.bone('upperChest') ?? avatar.bone('chest'))?.getWorldPosition(new THREE.Vector3()).y ?? waist + 0.25;
+  panelHeight -= 0.08;
   controls.target.set(body.position.x, y, body.position.z);
   camera.position.copy(controls.target).addScaledVector(fwd, dist);
   followOffset = null;
@@ -135,6 +141,10 @@ const tapper = create<TapPlayer>('tap', { ...cfg.tap, options: { ...cfg.tap.opti
 const touchFx = create<TouchEffect>('touchfx', cfg.touchFx);
 const glass = new ScreenGlass(camera, avatar.object, touchFx);
 scene.add(touchFx.object);
+// Shown while the avatar stands near the room's panel location; the room lists its controls.
+const panel = manifest.panel ? create<GlassUi | null>('panel', { ...cfg.panel, options: { ...cfg.panel.options, controls: manifest.panel.controls } }) : null;
+const panelSpot = panel && manifest.locations.find((l) => l.name === manifest.panel!.location);
+if (panel) scene.add(panel.object);
 
 const player = new WebAudioPlayer();
 const lifecycle = new BrowserLifecycle();
@@ -269,14 +279,18 @@ function gesture(data: ServerMsg<'gesture'>['data']): void {
     if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'cannot tap while walking' });
     return;
   }
-  // Gestures are for the user: turn to face them first when standing (a wave at the window would face away).
-  if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
-  const ok = gestures.play(data.name, (completed) =>
+  const ok = playGesture(data.name, (completed) =>
     completed
       ? net.send('gesture_finished', { cmd_id: data.cmd_id, name: data.name })
       : net.send('command_cancelled', { cmd_id: data.cmd_id, reason: 'replaced' }),
   );
   if (!ok) net.send('command_cancelled', { cmd_id: data.cmd_id, reason: `unknown gesture ${data.name}` });
+}
+
+function playGesture(name: string, onDone?: (completed: boolean) => void): boolean {
+  // Gestures are for the user: turn to face them first when standing (a wave at the window would face away).
+  if (!loco.cmd) loco.face((Math.atan2(camera.position.x - avatar.object.position.x, camera.position.z - avatar.object.position.z) * 180) / Math.PI);
+  return gestures.play(name, onDone);
 }
 
 // ---------------------------------------------------------------- touching the screen
@@ -346,6 +360,8 @@ function tryPendingTap(): void {
 
 glass.onTouch((t: ScreenTouch) => {
   hud.status.textContent = `${t.source === 'user' ? 'You' : 'Kamari'} touched the screen at ${Math.round(t.x * 100)}%, ${Math.round(t.y * 100)}%`;
+  const control = panel?.controlAt(t.point);
+  if (control) usePanel(control.id, t.source);
   if (t.source === 'user') {
     lastUserTouch = { x: t.x, y: t.y, at: performance.now() };
     lookFor(t.point, 1500);
@@ -369,6 +385,64 @@ function wireTouches(): void {
     if (cfg.debug && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 6) userTouch(e);
     down = null;
   });
+}
+
+// ---------------------------------------------------------------- the panel on the glass
+// A translucent row of controls that fades in while the avatar stands at the room's centre. Both
+// sides press it through the glass; the server hears every press (and the LLM can ask for one).
+/** The press the server asked the avatar for, until its fingertip lands on that control. */
+let pressCmd: { cmdId: string; control: string } | null = null;
+/** Panel actions that wait for the avatar's arm to come back from the glass (gestures). */
+let afterTap: (() => void)[] = [];
+
+function updatePanel(dt: number): void {
+  if (!panel) return;
+  const at = panelSpot?.position;
+  const near = !!at && Math.hypot(avatar.object.position.x - at.x, avatar.object.position.z - at.z) <= manifest.panel!.radius_m;
+  panel.show(near && !loco.moving);
+  if (panel.shown > 0 || near) {
+    const p = avatar.object.getWorldPosition(new THREE.Vector3()).setY(panelHeight);
+    panel.place(glass.onGlass(p), camera.quaternion);
+  }
+  panel.update(dt);
+}
+
+function usePanel(id: string, source: 'user' | 'avatar'): void {
+  const pressed = panel?.press(id, source);
+  if (!pressed) return;
+  const c = pressed.control;
+  hud.status.textContent = `${source === 'user' ? 'You' : 'Kamari'} pressed ${c.label}${c.kind === 'toggle' ? (c.on ? ' (on)' : ' (off)') : ''}`;
+  const action = c.action ?? '';
+  if (action === 'lights') {
+    hemi.intensity = c.on ? lightLevels.hemi : lightLevels.hemi * 0.3;
+    sun.intensity = c.on ? lightLevels.sun : lightLevels.sun * 0.15;
+  } else if (action.startsWith('gesture:')) {
+    const play = () => playGesture(action.slice('gesture:'.length));
+    if (source === 'avatar') afterTap.push(play);
+    else play();
+  }
+  const cmdId = source === 'avatar' && pressCmd?.control === id ? pressCmd.cmdId : undefined;
+  if (cmdId) pressCmd = null;
+  net.send('control_pressed', { control: id, source, ...(c.kind === 'toggle' ? { on: !!c.on } : {}), ...(cmdId ? { cmd_id: cmdId } : {}) });
+}
+
+/** The server asks the avatar to press a control: it reaches out and taps it through the glass. */
+function pressControl(data: ServerMsg<'press_control'>['data']): void {
+  const fail = (reason: string) => net.send('command_cancelled', { cmd_id: data.cmd_id, reason });
+  if (!panel?.controls.some((c) => c.id === data.control)) return fail(`unknown control ${data.control}`);
+  const point = panel.touchable && panel.pointOf(data.control);
+  if (!point) return fail('panel_hidden');
+  const req = { cmdId: data.cmd_id, control: data.control };
+  pressCmd = req;
+  const ok = avatarTap(glass.screenOf(point), (completed, reason) => {
+    if (pressCmd !== req) return; // pressed: reported with control_pressed
+    pressCmd = null;
+    fail(completed ? 'missed' : (reason ?? 'interrupted'));
+  });
+  if (!ok) {
+    pressCmd = null;
+    fail('cannot press while walking');
+  }
 }
 
 // ---------------------------------------------------------------- speech and conversation
@@ -430,6 +504,12 @@ function command(text: string): void {
     const at = tap[1] ? { x: Number(tap[1]), y: Number(tap[2]) } : null;
     if (at && ![at.x, at.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) hud.status.textContent = 'Usage: /tap, or /tap x y with x and y between 0 and 1';
     else if (!avatarTap(at, (ok, reason) => !ok && (hud.status.textContent = `Didn't tap: ${reason}`))) hud.status.textContent = "Can't tap while walking";
+    return;
+  }
+  const press = /^\/press\s+(\S+)$/i.exec(text);
+  if (press) {
+    // "/press lights": Kamari presses a panel control, as the LLM's press_control does (works offline too).
+    pressControl({ cmd_id: `local_${++localCmds}`, control: press[1].toLowerCase() });
     return;
   }
   if (net.state === 'open') {
@@ -567,7 +647,7 @@ async function start(): Promise<void> {
   anim.update(0);
   frame();
   wireTouches();
-  if (cfg.debug) Object.assign(window, { kamari: { scene, camera, controls, avatar, glass } }); // poke at it from the console
+  if (cfg.debug) Object.assign(window, { kamari: { scene, camera, controls, avatar, glass, panel, gestures } }); // poke at it from the console
   avatar.lookAt(camera.position);
 
   hud.conn.textContent = net.state; // the tap may have connected while assets were loading
@@ -594,6 +674,7 @@ async function start(): Promise<void> {
   });
   net.on('gesture', (m) => gesture(m.data));
   net.on('look_at', (m) => lookAt(m.data));
+  net.on('press_control', (m) => pressControl(m.data));
   net.on('transcript', (m) => (hud.you.textContent = m.data.text || '(nothing heard)'));
   net.on('turn_timing', (m) => {
     const ms = m.data.first_audio_ms ?? m.data.tts_first_audio_ms;
@@ -679,12 +760,18 @@ function loop(time?: number): void {
   anim.update(step);
   gestures.update(step);
   tapper.update(step);
+  if (!tapper.playing && afterTap.length) {
+    const run = afterTap;
+    afterTap = [];
+    for (const f of run) f();
+  }
   touchFx.update(step);
   lipSync.update(player.context?.currentTime ?? 0, avatar);
   avatar.lookAt(camera.position);
   avatar.update(step);
   follow(step);
   controls.update();
+  updatePanel(step);
   renderer.render(scene, camera);
 
   frames++;
