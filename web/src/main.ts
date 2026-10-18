@@ -17,9 +17,11 @@ import type {
   TapPlayer,
   TouchEffect,
   Vec2,
+  VoiceActivityDetector,
 } from './interfaces';
 import { BrowserLifecycle } from './lifecycle/BrowserLifecycle';
 import { Locomotion, pathLength, type LocoState, type WalkCommand } from './loco/Locomotion';
+import { OpenMic, type AvatarActivity } from './mic/OpenMic';
 import { PushToTalk } from './mic/PushToTalk';
 import { WebSocketProtocolClient } from './net/WebSocketProtocolClient';
 import { AdaptiveQuality, detectDevice, presetFor } from './quality/QualityProfile';
@@ -371,7 +373,54 @@ function wireTouches(): void {
 
 // ---------------------------------------------------------------- speech and conversation
 const speech = new SpeechPlayer(player, lipSync, (type, data) => net.send(type, data));
-const ptt = new PushToTalk(mic, net, () => speech.interrupt(), () => player.context, { tailMs: cfg.mic.options?.tailMs as number | undefined });
+
+/** The user started talking over the avatar: stop its speech and its walk now, before the server hears. */
+function bargeIn(): void {
+  speech.interrupt();
+  cancelPendingTap('interrupted');
+  tapper.cancel();
+  const stopped = loco.stop();
+  if (stopped?.cmdId) net.send('command_cancelled', { cmd_id: stopped.cmdId, reason: 'interrupted' });
+  if (stopped) {
+    sendState();
+    hud.status.textContent = 'Stopped: you started talking';
+  }
+}
+
+function activity(): AvatarActivity {
+  return speech.talking ? 'talking' : loco.moving ? 'walking' : 'idle';
+}
+
+const ptt = new PushToTalk(mic, net, bargeIn, () => player.context, { tailMs: cfg.mic.options?.tailMs as number | undefined });
+const vadSpec = { ...cfg.vad, options: { ...cfg.vad.options, ...(typeof cfg.vad.options?.model === 'string' ? { model: `${base}${cfg.vad.options.model}` } : {}) } };
+const openMic = new OpenMic(
+  mic,
+  create<VoiceActivityDetector>('vad', vadSpec),
+  net,
+  {
+    connected: () => net.state === 'open',
+    activity,
+    outputLevel: () => player.outputLevel(),
+    duck: (on, gain) => player.setVolume(on ? gain : 1, on ? 0.04 : 0.15),
+    bargeIn,
+  },
+  () => player.context,
+  cfg.openMic,
+  () => create<VoiceActivityDetector>('vad', { impl: 'energy' }),
+);
+const MODE_KEY = 'kamari.micMode';
+function initialMode(): 'open' | 'ptt' {
+  if (cfg.micMode !== 'auto') return cfg.micMode;
+  try {
+    const saved = localStorage.getItem(MODE_KEY);
+    if (saved === 'open' || saved === 'ptt') return saved;
+  } catch {
+    // storage blocked: use the default
+  }
+  return device.coarsePointer ? 'ptt' : 'open';
+}
+let micMode = initialMode();
+let muted = false;
 
 /** Typed text goes to the LLM; "/go to sofa", "/say hi" and "/gesture wave" drive the avatar directly. Offline, only walking works. */
 function command(text: string): void {
@@ -423,26 +472,68 @@ function buildDebugPanel(): void {
 function buildTalkButton(): void {
   const btn = $('talk') as HTMLButtonElement;
   const label = btn.querySelector('span')!;
+  const modeBtn = $('mode') as HTMLButtonElement;
+  const micError = (e: unknown) => (hud.status.textContent = `Microphone: ${e instanceof Error ? e.message : String(e)}`);
   ptt.onState = (st) => {
+    if (micMode !== 'ptt') return;
     btn.dataset.state = st;
     label.textContent = { idle: 'Hold to talk', opening: 'Allow the microphone…', talking: 'Listening… release to send', sending: 'Sending…' }[st];
     if (st === 'talking') hud.you.textContent = '…';
   };
-  ptt.onError = (e) => (hud.status.textContent = `Microphone: ${e instanceof Error ? e.message : String(e)}`);
+  ptt.onError = micError;
+  openMic.onError = micError;
+  openMic.onState = (st) => {
+    if (micMode !== 'open') return;
+    btn.dataset.state = { off: muted ? 'muted' : 'idle', opening: 'opening', listening: 'listening', maybe: 'listening', speaking: 'talking' }[st];
+    label.textContent = muted ? 'Muted: tap to listen' : { off: 'Tap to listen', opening: 'Allow the microphone…', listening: 'Listening: just talk', maybe: 'Listening: just talk', speaking: 'Hearing you…' }[st];
+    if (st === 'speaking') hud.you.textContent = '…';
+    if (st === 'listening' && openMic.detector !== 'silero') hud.status.textContent = `Voice detection: ${openMic.detector}`;
+  };
+  openMic.onProb = (p) => btn.style.setProperty('--voice', p.toFixed(2));
+  const showMode = () => {
+    modeBtn.textContent = micMode === 'open' ? 'Hands-free: on' : 'Hands-free: off';
+    modeBtn.setAttribute('aria-pressed', String(micMode === 'open'));
+    if (micMode === 'open') openMic.onState(openMic.state);
+    else ptt.onState(ptt.state);
+  };
+  modeBtn.onclick = async () => {
+    micMode = micMode === 'open' ? 'ptt' : 'open';
+    try {
+      localStorage.setItem(MODE_KEY, micMode);
+    } catch {
+      // not remembered: fine
+    }
+    if (micMode === 'ptt') await openMic.stop();
+    else {
+      ptt.cancel();
+      muted = false;
+      void openMic.start(); // a click: the permission prompt may show
+    }
+    showMode();
+  };
+  showMode();
+  // Hands-free: a click (pointer, keyboard or assistive tech) mutes or unmutes the open mic.
+  btn.addEventListener('click', () => {
+    if (micMode !== 'open') return;
+    muted = openMic.state !== 'off';
+    void (muted ? openMic.stop() : openMic.start()).then(showMode);
+  });
+  // Push-to-talk: hold the button.
   btn.addEventListener('pointerdown', (e) => {
+    if (micMode !== 'ptt') return;
     btn.setPointerCapture(e.pointerId);
     void ptt.down();
   });
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, () => void ptt.up());
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(ev, () => micMode === 'ptt' && void ptt.up());
   btn.addEventListener('contextmenu', (e) => e.preventDefault()); // long press on phones
   // Desktop: hold the space bar, unless typing in the text box.
   addEventListener('keydown', (e) => {
-    if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && started) {
+    if (micMode === 'ptt' && e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && started) {
       e.preventDefault();
       void ptt.down();
     }
   });
-  addEventListener('keyup', (e) => e.code === 'Space' && void ptt.up());
+  addEventListener('keyup', (e) => micMode === 'ptt' && e.code === 'Space' && void ptt.up());
 }
 
 // ---------------------------------------------------------------- start
@@ -480,7 +571,13 @@ async function start(): Promise<void> {
   avatar.lookAt(camera.position);
 
   hud.conn.textContent = net.state; // the tap may have connected while assets were loading
-  net.onState((s) => (hud.conn.textContent = s));
+  net.onState((s) => {
+    hud.conn.textContent = s;
+    // The server drops a segment it was collecting when the connection goes: drop ours too, and listen
+    // again once the session is back (if hands-free, unmuted and visible; the mic permission is kept).
+    if (s !== 'open') openMic.cancel();
+    else if (micMode === 'open' && !muted && document.visibilityState === 'visible' && mic.ready) void openMic.start();
+  });
   net.on('walk_to', (m) => walk(m.data));
   net.on('stop_moving', (m) => {
     cancelPendingTap('stopped');
@@ -515,11 +612,13 @@ async function start(): Promise<void> {
   net.on('error', (m) => (hud.status.textContent = `Server: ${m.data.message}`));
   lifecycle.onHidden(() => {
     ptt.cancel();
+    openMic.cancel();
     net.send('visibility', { state: 'hidden' });
   });
   lifecycle.onVisible(() => {
     if (net instanceof WebSocketProtocolClient) net.wake();
     net.send('visibility', { state: 'visible' });
+    if (micMode === 'open' && !muted) void openMic.start();
   });
 
   loop();
@@ -536,6 +635,7 @@ $('start').addEventListener('click', async () => {
   }
   void lifecycle.keepAwake(true);
   net.connect();
+  if (micMode === 'open') void openMic.start(); // inside the tap: the mic permission prompt needs one
 });
 
 // Keep the avatar framed (it walks off screen on a portrait phone): glide the orbit target

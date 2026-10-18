@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
+    "onnxruntime-web": "1.30.0",
     "recast-navigation": "^0.43.1",
     "three": "^0.186.1"
   },

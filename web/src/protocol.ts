@@ -588,9 +588,19 @@ export interface UserSpeechStartMessage {
   ts: number;
   data: UserSpeechStartData;
 }
+/**
+ * Open mic: the browser's VAD heard the user start speaking. Audio frames follow, starting with a little audio from before the start.
+ */
 export interface UserSpeechStartData {
   segment_id: string;
-  while?: "idle" | "talking" | "walking";
+  /**
+   * stream_id of the mic audio frames for this segment
+   */
+  stream_id: number;
+  /**
+   * what the avatar was doing: talking or walking means a barge-in
+   */
+  while?: "idle" | "talking" | "walking" | "thinking";
 }
 export interface UserSpeechEndMessage {
   v: 1;
@@ -602,6 +612,9 @@ export interface UserSpeechEndMessage {
   ts: number;
   data: UserSpeechEndData;
 }
+/**
+ * Open mic: the user stopped speaking; transcribe the segment and answer it.
+ */
 export interface UserSpeechEndData {
   segment_id: string;
   duration_ms: number;

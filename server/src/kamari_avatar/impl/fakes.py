@@ -10,7 +10,7 @@ import asyncio
 import math
 import struct
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from ..interfaces import (
     AudioSegment,
@@ -29,25 +29,19 @@ from ..registry import register
 
 @register("vad", "fake")
 class FakeVAD:
-    """Energy threshold on PCM16. Good enough for tests, not for real rooms."""
+    """Counts 20 ms frames whose peak passes a fixed threshold. Good enough for tests, not for real rooms."""
 
     def __init__(self, threshold: int = 500) -> None:
         self.threshold = threshold
-        self._speaking = False
 
-    def feed(self, pcm: bytes) -> Literal["start", "end"] | None:
-        n = len(pcm) // 2
-        if n == 0:
-            return None
-        samples = struct.unpack(f"<{n}h", pcm[: n * 2])
-        loud = max(abs(s) for s in samples) > self.threshold
-        if loud != self._speaking:
-            self._speaking = loud
-            return "start" if loud else "end"
-        return None
-
-    def reset(self) -> None:
-        self._speaking = False
+    def speech_ms(self, segment: AudioSegment) -> int:
+        frame = segment.sample_rate // 50 * 2
+        loud = 0
+        for i in range(0, len(segment.pcm) - frame + 1, frame):
+            n = frame // 2
+            if max(abs(v) for v in struct.unpack(f"<{n}h", segment.pcm[i:i + frame])) > self.threshold:
+                loud += 1
+        return loud * 20
 
 
 @register("stt", "fake")

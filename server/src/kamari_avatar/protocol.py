@@ -690,8 +690,15 @@ class UserSpeechStartData(BaseModel):
         extra='forbid',
     )
     segment_id: str
+    stream_id: Annotated[
+        int, Field(description='stream_id of the mic audio frames for this segment')
+    ]
     while_: Annotated[
-        Literal['idle', 'talking', 'walking'] | None, Field(alias='while')
+        Literal['idle', 'talking', 'walking', 'thinking'] | None,
+        Field(
+            alias='while',
+            description='what the avatar was doing: talking or walking means a barge-in',
+        ),
     ] = None
 
 

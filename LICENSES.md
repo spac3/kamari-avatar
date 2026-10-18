@@ -11,6 +11,8 @@ Every component is open source. Keep this file current when adding a library or 
 | `web/public/animations/ual.glb` | [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) (free Standard version) by Quaternius | CC0 1.0 | 9 clips and the skeleton, mesh removed, built with `web/scripts/build-animations.ts`. Taken from the [glTF mirror](https://github.com/J-Ponzo/gltf-universal-animation-library) of the itch.io download. |
 | Whisper model (not committed; downloaded on first start) | [Systran/faster-whisper-base.en](https://huggingface.co/Systran/faster-whisper-base.en), converted from OpenAI Whisper | MIT | Any faster-whisper model can be set in `config/backend.yaml`. |
 | Local LLM weights (optional, pulled by Ollama) | e.g. Qwen2.5 1.5B Instruct | Apache-2.0 | Check each model's licence before switching. |
+| `web/public/vad/silero_vad_v6.onnx` | [Silero VAD](https://github.com/snakers4/silero-vad) v6 by Silero Team, copied from the `@ricky0123/vad-web` 0.0.31 npm package (ISC) | MIT | Unmodified. Voice activity detection for the open mic. |
+| `web/test/fixtures/*-16k.pcm` | Generated with Piper and the `en_US-ljspeech-medium` voice | Trained on LJ Speech (public domain) | Two spoken sentences for the open-mic tests. |
 | Piper voice (not committed; downloaded per install) | [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) `en_US-ljspeech-medium` | Trained on LJ Speech (public domain) | Voices have individual licences: read each voice's MODEL_CARD before switching. Several (e.g. lessac) are not cleared for commercial use. |
 
 ## Libraries
@@ -35,6 +37,7 @@ Every component is open source. Keep this file current when adding a library or 
 | Silero VAD (bundled in faster-whisper) | MIT | trims silence before transcription |
 | openai Python SDK | Apache-2.0 | client for any OpenAI-compatible LLM endpoint (hosted or Ollama) |
 | Ollama (optional, runs separately) | MIT | local LLM server |
+| onnxruntime-web | MIT | Silero VAD in the browser (WASM) |
 | @vitejs/plugin-basic-ssl | MIT | self-signed HTTPS in development, for phone mic access |
 
 ## Services

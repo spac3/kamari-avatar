@@ -1759,18 +1759,26 @@
         "segment_id": {
           "type": "string"
         },
+        "stream_id": {
+          "type": "integer",
+          "description": "stream_id of the mic audio frames for this segment"
+        },
         "while": {
           "type": "string",
           "enum": [
             "idle",
             "talking",
-            "walking"
-          ]
+            "walking",
+            "thinking"
+          ],
+          "description": "what the avatar was doing: talking or walking means a barge-in"
         }
       },
       "required": [
-        "segment_id"
-      ]
+        "segment_id",
+        "stream_id"
+      ],
+      "description": "Open mic: the browser's VAD heard the user start speaking. Audio frames follow, starting with a little audio from before the start."
     },
     "UserSpeechStartMessage": {
       "type": "object",
@@ -1818,7 +1826,8 @@
       "required": [
         "segment_id",
         "duration_ms"
-      ]
+      ],
+      "description": "Open mic: the user stopped speaking; transcribe the segment and answer it."
     },
     "UserSpeechEndMessage": {
       "type": "object",

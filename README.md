@@ -6,9 +6,11 @@ driven by a Python backend. The backend's LLM uses Kamari's plugins (an MCP serv
 Everything is open source, and every component sits behind an interface chosen by config, so any
 part (avatar, navigation, speech-to-text, LLM, TTS, transport) can be swapped without touching the rest.
 
-> Status: **M2** (conversation). Hold the talk button (or the space bar) and speak: faster-whisper
+> Status: **M3** (hands-free). Just talk: the browser hears when you start and stop, faster-whisper
 > transcribes it, an LLM answers with streamed speech and tool calls ("go to the window and wave"
-> walks there, then waves), and Piper speaks each sentence as soon as it is written. See the [roadmap](#roadmap).
+> walks there, then waves) while Piper speaks each sentence as soon as it is written. Talk over
+> Kamari and it stops talking and walking at once, and remembers only what you heard. Phones use
+> hold to talk by default. See the [roadmap](#roadmap).
 
 ## Layout
 
@@ -30,7 +32,9 @@ web/                          Three.js client (Vite + TypeScript)
   src/anim/                   CC0 clips retargeted onto the avatar at load, procedural fallback
   src/loco/                   path following, speed-matched walk cycle, turn to face
   src/speech/                 audio scheduling and viseme timeline lip sync on the audio clock
-  src/mic/                    mic capture (AudioWorklet, 16 kHz PCM16) and push-to-talk
+  src/mic/                    mic capture (AudioWorklet, 16 kHz PCM16), push-to-talk, open mic with barge-in, echo gate
+  src/vad/                    voice activity detection: Silero (onnxruntime-web) or energy
+  public/vad/                 the Silero VAD model
   src/anim/ProceduralGestures upper-body gestures and head turns layered over the clips
   src/anim/IkScreenTap        reaching out and tapping the screen (two-bone IK, finger pointing)
   src/touch/                  the screen as glass between viewer and avatar; ripple circles on touch
@@ -56,10 +60,35 @@ npm install
 npm run dev            # bakes the navmesh, then serves on http://localhost:5173
 ```
 
-Open http://localhost:5173 and tap **Tap to talk to Kamari**. Hold **Hold to talk** (or the space
-bar) while you speak, and let go to send. The first press asks for the microphone. The text box
-sends typed messages the same way. Captions show what was heard and what Kamari says, and the
-**reply in** chip shows the time from the end of your speech to the first audio.
+Open http://localhost:5173 and tap **Tap to talk to Kamari**; the browser asks for the microphone.
+Then just talk. On a desktop the mic stays open (**Hands-free: on**): Kamari answers when you pause,
+and you can talk over it to interrupt. The talk button mutes and unmutes the mic, and glows while it
+hears a voice. Turn hands-free off to hold the button (or the space bar) while you speak instead;
+phones start that way. The text box sends typed messages the same way. Captions show what was heard
+and what Kamari says, and the **reply in** chip shows the time from the end of your speech to the
+first audio.
+
+### Hands-free and interrupting
+
+- **Hearing you:** Silero VAD runs in the browser (onnxruntime-web, ~14 MB of WASM loaded the first
+  time hands-free starts; the energy detector stands in if it cannot load, and the status chip says so).
+  About 0.3 s of audio from before you started goes with each utterance, and 0.7 s of silence ends it.
+- **Interrupting:** when you start talking over Kamari its voice dips at once; once you have talked
+  for about a third of a second it stops talking and walking, and the server cancels the rest of the
+  turn and keeps only the sentences you heard in the conversation. A cough or a knock only dips the
+  volume for a moment.
+- **Its own voice:** the browser's echo cancelling removes most of it. What gets through is caught by
+  an echo gate that compares the mic with what Kamari is playing (it learns how much leaks back, and
+  notices when the mic stops following the speaker because you are talking too), and the server drops
+  segments with too little speech and transcripts that only repeat what Kamari just said.
+  Headphones avoid echo altogether; if Kamari still interrupts itself on loud speakers, use hold to talk.
+- **Tuning:** `openMic` in `web/src/config.ts` (thresholds, how long you must talk to interrupt, the
+  pause that ends a turn), `vad`, `director.min_speech_ms` and `director.echo_filter` in
+  `config/backend.yaml`. `?micmode=open|ptt` and `?vad=energy` override from the query string.
+  `GET /latency` counts open-mic segments, barge-ins and segments dropped as noise or echo, to see how
+  often it misfires in your room.
+- **Pipecat:** evaluated as an alternative to this pipeline and not adopted for now; see
+  [docs/pipecat-evaluation.md](docs/pipecat-evaluation.md).
 
 ### Kamari behind the glass
 
@@ -147,7 +176,7 @@ A config file can start from another with `extends:` and replace whole sections,
 `config/llm-ollama.yaml` does. Pick the file with `KAMARI_AVATAR_CONFIG`.
 
 Browser: change `src/config.ts`, or override at runtime with the query string:
-`?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake`.
+`?avatar=fake&anim=procedural&nav=straight&quality=low&net=offline&mic=fake&vad=energy&micmode=ptt`.
 
 To add an implementation, implement the interface and register it under a new name
 (`@register("stt", "faster_whisper")` in Python, `register('avatar', 'glb', ...)` in TypeScript).
@@ -167,8 +196,8 @@ until the avatar has its own Kamari key. Details and decisions: [docs/kamari-int
 |---|---|
 | M0 | Interfaces, registry and config with fakes; protocol schema with generated types; room, navmesh, idling VRM avatar; session resume |
 | M1 | Walking along navmesh paths, Piper TTS with phoneme-timed lip sync, retargeted CC0 animation clips |
-| **M2** (this) | Push-to-talk, faster-whisper, LLM with tool calling behind the Director, sentence-streamed speech, gestures and look-at, latency per stage |
-| M3 | Hands-free mic with barge-in, walking and talking together |
+| M2 | Push-to-talk, faster-whisper, LLM with tool calling behind the Director, sentence-streamed speech, gestures and look-at, latency per stage |
+| **M3** (this) | Hands-free mic (Silero VAD in the browser) with barge-in that stops speech and walking, echo handling, history trimmed to what was heard, walking and talking together; Pipecat evaluated |
 | M4 | Gestures, expressions, audio-driven lip sync fallback, custom avatar |
 | M5 | Hardening, deployment, device matrix |
 

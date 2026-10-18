@@ -21,6 +21,11 @@ chunker:
   impl: punctuation
 conversation_store:
   impl: memory
+vad:
+  # Open mic only: a second opinion on each segment the browser's VAD sends. Segments with less
+  # speech than director.min_speech_ms are dropped before STT. `fake` counts loud frames.
+  impl: energy
+  options: { min_dbfs: -50, margin_db: 9 }
 # External tools the LLM can use. Kamari is the user's MCP server with plugins.
 # Give the avatar its own Kamari API key (env KAMARI_API_KEY) granted only the capabilities
 # it needs; `allow` is a second filter on top. Payments, infra, exec, vault, files, backups,
